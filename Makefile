@@ -15,7 +15,7 @@ release-all: release debug
 release:
 	mkdir -p build-release && \
     cd build-release && \
-    conan install .. --profile ../profiles/release-native && \
+    conan install .. --profile ../profiles/release-native --build missing && \
     cmake .. -DCMAKE_BUILD_TYPE=Release \
              -DCMAKE_C_COMPILER=${CC}   \
              -DCMAKE_CXX_COMPILER=${CXX} && \
@@ -24,7 +24,7 @@ release:
 debug:
 	mkdir -p build-debug && \
     cd build-debug && \
-    conan install .. --profile ../profiles/debug && \
+    conan install .. --profile ../profiles/debug --build missing && \
     cmake .. -DCMAKE_BUILD_TYPE=Debug \
              -DCMAKE_C_COMPILER=${CC}   \
              -DCMAKE_CXX_COMPILER=${CXX} && \
