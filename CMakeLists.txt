@@ -12,11 +12,15 @@ set(Boost_INSTALL_DIR ${CONAN_BOOST_ROOT})
 
 conan_basic_setup()
 
-set(CMAKE_EXE_LINKER_FLAGS "-static-libgcc -static-libstdc++")
+set(CROSS_LINKER_FLAGS "-static-libgcc -static-libstdc++")
+
+if (CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
+    set(CROSS_LINKER_FLAGS "-static")
+endif()
 
 add_executable(run main.cpp)
 
-target_link_libraries(run ${CONAN_LIBS})
+target_link_libraries(run ${CONAN_LIBS} ${CROSS_LINKER_FLAGS})
 
 IF ("${CMAKE_SYSTEM_NAME}" MATCHES "Windows")
    target_link_libraries(run ws2_32 wsock32)
