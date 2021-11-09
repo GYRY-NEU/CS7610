@@ -11,7 +11,15 @@
 
 #include <boost/log/trivial.hpp>
 #include <boost/log/core.hpp>
+#if defined(__clang__)
+    #pragma clang diagnostic push
+    #pragma clang diagnostic ignored "-Wunknown-warning-option"
+#endif
 #include <boost/log/expressions.hpp>
+#if defined(__clang__)
+    #pragma clang diagnostic pop
+#endif
+
 #include <boost/log/sources/logger.hpp>
 #include <boost/log/utility/setup/file.hpp>
 #include <boost/log/utility/setup/console.hpp>

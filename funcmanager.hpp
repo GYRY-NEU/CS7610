@@ -102,14 +102,18 @@ public:
         beast::flat_buffer buffer;
 
         // This lambda is used to send messages
-        auto send = [&, yield]<bool isRequest, class Body, class Fields>
-            (http::message<isRequest, Body, Fields>&& msg) {
+        auto send = [&, yield] (auto&& msg) {
+            // type(msg) == template<bool isRequest, class Body, class Fields>
+            //              http::message<isRequest, Body, Fields>
+            using message = typename std::remove_reference<decltype(msg)>::type;
             close = msg.need_eof();
 
             // We need the serializer here because the serializer requires
             // a non-const file_body, and the message oriented version of
             // http::write only works with const messages.
-            http::serializer<isRequest, Body, Fields> sr{msg};
+            http::serializer<message::is_request::value,
+                             typename message::body_type,
+                             typename message::fields_type> sr{msg};
             http::async_write(stream, sr, yield[ec]);
         };
 
