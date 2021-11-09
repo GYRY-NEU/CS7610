@@ -14,8 +14,9 @@ conan_basic_setup()
 
 set(CROSS_LINKER_FLAGS "-static-libgcc -static-libstdc++")
 
-if (CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
-    set(CROSS_LINKER_FLAGS "-static")
+if ("${CMAKE_CXX_COMPILER_ID}" MATCHES "Clang")
+    set(CROSS_LINKER_FLAGS "")
+    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fvisibility=hidden")
 endif()
 
 add_executable(run main.cpp)
