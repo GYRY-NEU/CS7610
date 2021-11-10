@@ -68,6 +68,10 @@ int main(int argc, char* argv[])
                                http->do_listen(tcp::endpoint{tcp::v4(), port}, yield);
                            });
     }
+    else if (vm.count("register"))
+    {
+
+    }
 
     std::vector<std::thread> v;
     v.reserve(worker - 1);

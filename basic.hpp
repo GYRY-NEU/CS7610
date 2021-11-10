@@ -30,6 +30,14 @@
 #include <boost/log/sinks/text_ostream_backend.hpp>
 #include <boost/log/attributes/named_scope.hpp>
 
+#include <boost/uuid/uuid.hpp>
+#include <boost/uuid/uuid_generators.hpp>
+#include <boost/uuid/uuid_io.hpp>
+
+#include <boost/json.hpp>
+
+#include <tbb/concurrent_unordered_set.h>
+
 namespace beast = boost::beast;         // from <boost/beast.hpp>
 namespace http = beast::http;           // from <boost/beast/http.hpp>
 namespace net = boost::asio;            // from <boost/asio.hpp>
@@ -80,6 +88,12 @@ void init_log()
     /* console sink */
     auto console = boost::log::add_console_log(std::clog);
     console->set_formatter(final_format);
+}
+
+inline
+auto genuuid() -> boost::uuids::uuid
+{
+    return boost::uuids::random_generator()();
 }
 
 }// namespace basic

@@ -4,5 +4,16 @@
 
 // launch function
 
+namespace launch
+{
+
+class info
+{
+public:
+    info()
+
+};
+
+} // launch
 
 #endif // FUNCLAUNCH_HPP__

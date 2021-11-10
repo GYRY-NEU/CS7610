@@ -3,6 +3,7 @@
 #define FUNCMANAGER_HPP__
 
 #include "basic.hpp"
+#include "funcworker.hpp"
 
 #include <memory>
 #include <iostream>
@@ -13,6 +14,8 @@ namespace manager
 class http_server : public std::enable_shared_from_this<http_server>
 {
     net::io_context & ioc_;
+//    tbb::concurrent_unordered_multimap<boost::uuids::uuid, worker> workers_;
+    tbb::concurrent_unordered_set<worker, hash<worker>> workers_;
 
     // Returns a bad request response
     template<typename Body, typename Allocator>
@@ -180,8 +183,52 @@ public:
         }
         case http::verb::get:
         {
+            worker& back = *workers_.begin();
+
+            http::request<http::string_body> backreq {http::verb::get, "/", req.version()};
+            backreq.set(http::field::host, req[http::field::host]);
+            backreq.set(http::field::user_agent, BOOST_BEAST_VERSION_STRING);
+            beast::error_code ec;
+
+            BOOST_LOG_TRIVIAL(trace) << "backstream.async_connect\n";
+            beast::tcp_stream backstream{ioc_};
+            tcp::endpoint backendpoint(back.address_, back.port_);
+            backstream.async_connect(backendpoint, yield[ec]);
+
+            BOOST_LOG_TRIVIAL(trace) << "backstream.async_write\n";
+            http::async_write(backstream, backreq, yield[ec]);
+
+            BOOST_LOG_TRIVIAL(trace) << "backstream.async_read\n";
+            http::response<http::string_body> backres;
+            http::async_read(backstream, buffer, backres, yield[ec]);
+
             http::response<http::string_body> res{http::status::ok, req.version()};
-            res.body() = "An Hello world: " + std::string(req.target());
+            res.body() = backres.body();
+            res.set(http::field::server, BOOST_BEAST_VERSION_STRING);
+            res.set(http::field::content_type, "application/text");
+            res.keep_alive(req.keep_alive());
+            res.prepare_payload();
+            return send(std::move(res));
+        }
+        case http::verb::put:
+        {
+            http::request_parser<http::string_body> parser {std::move(reqparser)};
+            beast::error_code ec;
+
+            parser.body_limit(std::numeric_limits<std::uint64_t>::max());
+            http::async_read(stream, buffer, parser, yield[ec]);
+            boost::json::value v = boost::json::parse(parser.get().body());
+            boost::json::object const& obj = v.as_object();
+
+            auto && [it, ok] = workers_.emplace (
+                boost::json::value_to<std::string>(obj.at("host")).c_str(),
+                boost::json::value_to<int>(obj.at("port"))
+            );
+
+            BOOST_LOG_TRIVIAL(trace) << *it << "\n";
+            http::response<http::string_body> res{http::status::ok, req.version()};
+
+            res.body() = "Registered"s;
             res.set(http::field::server, BOOST_BEAST_VERSION_STRING);
             res.set(http::field::content_type, "application/text");
             res.keep_alive(req.keep_alive());
@@ -197,13 +244,16 @@ public:
                 http::request_parser<http::file_body> parser {std::move(reqparser)};
                 beast::error_code ec;
 
+                boost::uuids::uuid id = basic::genuuid();
+                std::string name = "/tmp/"s + boost::uuids::to_string(id);
                 parser.body_limit(std::numeric_limits<std::uint64_t>::max());
-                parser.get().body().open("/tmp/123.txt", boost::beast::file_mode::write, ec);
+                parser.get().body().open(name.data(), boost::beast::file_mode::write, ec);
                 http::async_read(stream, buffer, parser, yield[ec]);
 
-                BOOST_LOG_TRIVIAL(trace) << "Writing to /tmp/123.txt \n";
+                BOOST_LOG_TRIVIAL(trace) << "Writing to " << name << " \n";
                 http::response<http::string_body> res{http::status::ok, req.version()};
-                res.body() = "Accepted => "s + "/tmp/123.txt";
+
+                res.body() = "Accepted => "s + name;
                 res.set(http::field::server, BOOST_BEAST_VERSION_STRING);
                 res.set(http::field::content_type, "application/text");
                 res.keep_alive(req.keep_alive());
