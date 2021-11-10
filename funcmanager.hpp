@@ -122,9 +122,9 @@ public:
             // Set the timeout.
             stream.expires_after(std::chrono::seconds(30));
 
-            // Read a request
-            http::request<http::string_body> req;
-            http::async_read(stream, buffer, req, yield[ec]);
+            http::request_parser<http::empty_body> reqparser;
+            reqparser.body_limit(std::numeric_limits<std::uint64_t>::max());
+            http::async_read_header(stream, buffer, reqparser, yield[ec]);
 
             if (ec == http::error::end_of_stream)
                 break;
@@ -133,7 +133,7 @@ public:
                 return basic::fail(ec, "read");
 
             // Send the response
-            handle_request(std::move(req), send);
+            handle_request(stream, buffer, std::move(reqparser), send, yield);
             if (ec)
                 return basic::fail(ec, "write");
 
@@ -147,31 +147,29 @@ public:
 
         // Send a TCP shutdown
         stream.socket().shutdown(tcp::socket::shutdown_send, ec);
-
-        // At this point the connection is closed gracefully
     }
 
     // This function produces an HTTP response for the given
     // request. The type of the response object depends on the
     // contents of the request, so the interface requires the
     // caller to pass a generic lambda for receiving the response.
-    template<typename Body, typename Allocator, typename Send>
-    void handle_request(http::request<Body, http::basic_fields<Allocator>>&& req,
-                        Send&& send)
+    template<typename Send>
+    void handle_request(beast::tcp_stream& stream,
+                        beast::flat_buffer& buffer,
+                        http::request_parser<http::empty_body>&& reqparser,
+                        Send&& send,
+                        net::yield_context yield)
     {
-        // Make sure we can handle the method
-        if (req.method() != http::verb::get &&
-            req.method() != http::verb::head)
-            return send(http_bad_request("Unknown HTTP-method", req));
-
         // Request path must be absolute and not contain "..".
+        auto&& req = reqparser.get();
         if (req.target().empty() ||
             req.target()[0] != '/' ||
             req.target().find("..") != beast::string_view::npos)
             return send(http_server_error("Illegal request-target", req));
 
-        // Respond to HEAD request
-        if (req.method() == http::verb::head)
+        switch (req.method())
+        {
+        case http::verb::head:
         {
             http::response<http::empty_body> res{http::status::ok, req.version()};
             res.set(http::field::server, BOOST_BEAST_VERSION_STRING);
@@ -180,15 +178,43 @@ public:
             res.keep_alive(req.keep_alive());
             return send(std::move(res));
         }
+        case http::verb::get:
+        {
+            http::response<http::string_body> res{http::status::ok, req.version()};
+            res.body() = "An Hello world: " + std::string(req.target());
+            res.set(http::field::server, BOOST_BEAST_VERSION_STRING);
+            res.set(http::field::content_type, "application/text");
+            res.keep_alive(req.keep_alive());
+            res.prepare_payload();
+            return send(std::move(res));
+        }
+        case http::verb::post:
+        {
+            if (req[http::field::content_type] == "application/x-www-form-urlencoded" ||
+                req[http::field::content_type] == "multipart/form-data")
+            {
+                //dynamic_body string_body
+                http::request_parser<http::file_body> parser {std::move(reqparser)};
+                beast::error_code ec;
 
-        // Respond to GET request
-        http::response<http::string_body> res{http::status::ok, req.version()};
-        res.body() = "An Hello world: " + std::string(req.target());
-        res.set(http::field::server, BOOST_BEAST_VERSION_STRING);
-        res.set(http::field::content_type, "application/text");
-        res.keep_alive(req.keep_alive());
-        res.prepare_payload();
-        return send(std::move(res));
+                parser.body_limit(std::numeric_limits<std::uint64_t>::max());
+                parser.get().body().open("/tmp/123.txt", boost::beast::file_mode::write, ec);
+                http::async_read(stream, buffer, parser, yield[ec]);
+
+                BOOST_LOG_TRIVIAL(trace) << "Writing to /tmp/123.txt \n";
+                http::response<http::string_body> res{http::status::ok, req.version()};
+                res.body() = "Accepted => "s + "/tmp/123.txt";
+                res.set(http::field::server, BOOST_BEAST_VERSION_STRING);
+                res.set(http::field::content_type, "application/text");
+                res.keep_alive(req.keep_alive());
+                res.prepare_payload();
+                return send(std::move(res));
+            }
+        }
+        default:
+            BOOST_LOG_TRIVIAL(info) << "request " << req.method() << "not handled\n";
+        }
+        return send(http_bad_request("Unhandled HTTP-method", req));
     }
 
 };
