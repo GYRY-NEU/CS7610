@@ -12,7 +12,7 @@ set(Boost_INSTALL_DIR ${CONAN_BOOST_ROOT})
 
 conan_basic_setup()
 
-set(CROSS_LINKER_FLAGS "-static-libgcc -static-libstdc++")
+set(CROSS_LINKER_FLAGS "-static -static-libgcc -static-libstdc++")
 
 if ("${CMAKE_CXX_COMPILER_ID}" MATCHES "Clang")
     set(CROSS_LINKER_FLAGS "")

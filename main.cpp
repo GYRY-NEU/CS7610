@@ -1,15 +1,11 @@
 
-//------------------------------------------------------------------------------
-//
-// Example: HTTP server, coroutine
-//
-//------------------------------------------------------------------------------
 
 // nodes shares same binary
 // executer => ./run --register ip:port
 // coordinator => ./run --listen port
 
 #include "funcmanager.hpp"
+#include "funcexecuter.hpp"
 #include "basic.hpp"
 
 #include <boost/program_options.hpp>
@@ -32,8 +28,8 @@ int main(int argc, char* argv[])
     po::options_description desc{"Options"};
     desc.add_options()
         ("help,h", "Print this help messages")
-        ("register,r", po::value<std::string>(), "[executer] register to this host ip:port")
-        ("listen,l",   po::value<unsigned short>(), "[coordinator] listen on this port");
+        ("register,r", po::value<std::string>(), "[worker] register to this host 'ip:port'")
+        ("listen,l",   po::value<unsigned short>()->default_value(12000), "[coordinator] listen on this port");
     po::positional_options_description pos_po;
     po::variables_map vm;
     po::store(po::command_line_parser(argc, argv)
@@ -47,21 +43,15 @@ int main(int argc, char* argv[])
         return EXIT_FAILURE;
     }
 
-    if (vm.count("listen") + vm.count("register") == 0)
-    {
-        BOOST_LOG_TRIVIAL(fatal) << "please use --register or --listen to set the mode\n";
-        return EXIT_FAILURE;
-    }
-
     int const worker = std::thread::hardware_concurrency();
 
     net::io_context ioc {worker};
 
-    if (vm.count("listen"))
+    unsigned short const port = vm["listen"].as<unsigned short>();
+    BOOST_LOG_TRIVIAL(info) << "listen on " << port << "\n";
+    if (vm.count("listen") and not vm.count("register"))
     {
-        unsigned short const port = vm["listen"].as<unsigned short>();
-        BOOST_LOG_TRIVIAL(info) << "listen on " << port << "\n";
-
+        BOOST_LOG_TRIVIAL(info) << "Starting coordinator\n";
         auto http = std::make_shared<manager::http_server>(ioc);
         boost::asio::spawn(ioc,
                            [http=http->shared_from_this(), port] (net::yield_context yield) {
@@ -70,7 +60,37 @@ int main(int argc, char* argv[])
     }
     else if (vm.count("register"))
     {
+        BOOST_LOG_TRIVIAL(info) << "Starting worker\n";
 
+        std::string const remote = vm["register"].as<std::string>();
+        std::size_t sap = remote.find(":");
+        std::string const remotehost = remote.substr(0, sap);
+        unsigned short const remoteport = std::stoi(remote.substr(sap+1));
+        BOOST_LOG_TRIVIAL(trace) << "register to " << remotehost << ":" << remoteport << "\n";
+
+        beast::tcp_stream stream{ioc};
+        tcp::endpoint backendpoint(net::ip::make_address(remotehost.c_str()), remoteport);
+        stream.connect(backendpoint);
+
+        http::request<http::string_body> req{http::verb::put, "/", 11};
+        req.set(http::field::host, remotehost);
+        req.set(http::field::user_agent, BOOST_BEAST_VERSION_STRING);
+
+        boost::json::value jv = {
+            { "host", remotehost },
+            { "port", port },
+        };
+        BOOST_LOG_TRIVIAL(trace) << "register: " << jv << "\n";
+        req.body() = boost::json::serialize(jv);
+        req.prepare_payload();
+
+        http::write(stream, req);
+
+        auto exec = std::make_shared<executer::executer>(ioc);
+        boost::asio::spawn(ioc,
+                           [exec=exec->shared_from_this(), port] (net::yield_context yield) {
+                               exec->do_listen(tcp::endpoint{tcp::v4(), port}, yield);
+                           });
     }
 
     std::vector<std::thread> v;
@@ -78,6 +98,9 @@ int main(int argc, char* argv[])
     for(int i = 1; i < worker; i++)
         v.emplace_back([&ioc] { ioc.run(); });
     ioc.run();
+
+    for (std::thread& th : v)
+        th.join();
 
     return EXIT_SUCCESS;
 }

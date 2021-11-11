@@ -3,6 +3,8 @@ boost/1.77.0@
 tbb/2020.3@
 
 [options]
+boost:shared=False
+tbb:shared=False
 
 [generators]
 cmake

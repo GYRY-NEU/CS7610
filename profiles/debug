@@ -5,4 +5,3 @@ cppstd=17
 build_type=Debug
 
 [options]
-boost:shared=False
