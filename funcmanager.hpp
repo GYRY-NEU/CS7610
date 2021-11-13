@@ -16,6 +16,7 @@ class http_server : public std::enable_shared_from_this<http_server>
     net::io_context & ioc_;
 //    tbb::concurrent_unordered_multimap<boost::uuids::uuid, worker> workers_;
     tbb::concurrent_unordered_set<worker, hash<worker>> workers_;
+    std::string const zip_storage_;
 
     // Returns a bad request response
     template<typename Body, typename Allocator>
@@ -35,7 +36,7 @@ class http_server : public std::enable_shared_from_this<http_server>
     // Returns a server error response
     template<typename Body, typename Allocator>
     auto http_server_error(beast::string_view what,
-                             http::request<Body, http::basic_fields<Allocator>>& req)
+                           http::request<Body, http::basic_fields<Allocator>>& req)
         -> http::response<http::string_body>
     {
         http::response<http::string_body> res{http::status::internal_server_error, req.version()};
@@ -48,7 +49,12 @@ class http_server : public std::enable_shared_from_this<http_server>
     }
 
 public:
-    http_server(net::io_context & io) : ioc_{io} {}
+    http_server(net::io_context & io, std::string const &path) :
+        ioc_{io},
+        zip_storage_(path)
+    {
+        boost::filesystem::create_directory(zip_storage_);
+    }
 
     // Accepts incoming connections and launches the sessions
     void do_listen(tcp::endpoint endpoint,
@@ -245,29 +251,10 @@ public:
                 beast::error_code ec;
 
                 boost::uuids::uuid id = basic::genuuid();
-                std::string name = "/tmp/"s + boost::uuids::to_string(id) + ".zip";
+                std::string const name = zip_storage_ + boost::uuids::to_string(id) + ".zip";
                 parser.body_limit(std::numeric_limits<std::uint64_t>::max());
                 parser.get().body().open(name.data(), boost::beast::file_mode::write, ec);
                 http::async_read(stream, buffer, parser, yield[ec]);
-
-                BOOST_LOG_TRIVIAL(trace) << "Extracting " << name << " \n";
-                libzippp::ZipArchive zf(name);
-                zf.open(libzippp::ZipArchive::ReadOnly);
-                SCOPE_DEFER ([&zf] { zf.close(); });
-
-                std::vector<libzippp::ZipEntry> entries = zf.getEntries();
-
-                for (auto it = entries.begin(); it != entries.end(); ++it)
-                {
-                    libzippp::ZipEntry & entry = *it;
-                    std::string const zipname = entry.getName();
-                    std::size_t const zipsize = entry.getSize();
-                    std::ofstream output(zipname, std::ios::out | std::ios::binary);
-
-                    char const* binary = static_cast<char const*>(entry.readAsBinary());
-                    BOOST_LOG_TRIVIAL(trace) << "Extract to " << zipname << " \n";
-                    output.write(binary, zipsize);
-                }
 
                 http::response<http::string_body> res{http::status::ok, req.version()};
 

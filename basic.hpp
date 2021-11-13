@@ -5,6 +5,7 @@
 #include <boost/beast/core.hpp>
 #include <boost/beast/http.hpp>
 #include <boost/beast/version.hpp>
+
 #include <boost/asio/ip/tcp.hpp>
 #include <boost/asio/spawn.hpp>
 #include <boost/config.hpp>
@@ -36,6 +37,10 @@
 
 #include <boost/json.hpp>
 
+#include <boost/filesystem.hpp>
+
+#include <boost/process.hpp>
+
 #include <tbb/concurrent_unordered_set.h>
 
 #include <libzippp/libzippp.h>
@@ -45,8 +50,9 @@
 #include "scope_exit.hpp"
 
 namespace beast = boost::beast;         // from <boost/beast.hpp>
-namespace http = beast::http;           // from <boost/beast/http.hpp>
-namespace net = boost::asio;            // from <boost/asio.hpp>
+namespace http  = boost::beast::http;   // from <boost/beast/http.hpp>
+namespace net   = boost::asio;          // from <boost/asio.hpp>
+namespace bp    = boost::process;       // from <boost/process.hpp>
 using tcp = boost::asio::ip::tcp;       // from <boost/asio/ip/tcp.hpp>
 using namespace std::string_literals;   // ...
 

@@ -10,6 +10,8 @@ namespace executer
 class executer : public std::enable_shared_from_this<executer>
 {
     net::io_context & ioc_;
+    std::string const zip_storage_;
+    std::string const execute_path_;
 
     template<typename Body, typename Allocator>
     auto http_bad_request(beast::string_view why,
@@ -26,7 +28,14 @@ class executer : public std::enable_shared_from_this<executer>
     }
 
 public:
-    executer(net::io_context & io) : ioc_{io} {}
+    executer(net::io_context & io, std::string const& zip, std::string const& exec):
+        ioc_{io},
+        zip_storage_(zip),
+        execute_path_(exec)
+    {
+        boost::filesystem::create_directory(zip_storage_);
+        boost::filesystem::create_directory(execute_path_);
+    }
 
     void do_listen(tcp::endpoint endpoint,
                    net::yield_context yield)
@@ -122,9 +131,60 @@ public:
         {
         case http::verb::get:
         {
-            http::response<http::string_body> res{http::status::ok, req.version()};
             std::string host(req[http::field::host]);
-            res.body() = "An "s + host + ": " + std::string(req.target());
+            std::size_t const trim_pos = host.find(":");
+            if (trim_pos != host.npos)
+                host = host.substr(0, trim_pos);
+
+            std::string const name = zip_storage_ + host + ".zip";
+
+            BOOST_LOG_TRIVIAL(trace) << "Extracting " << name << " \n";
+            std::string const fwd = execute_path_ + host + "/";
+            boost::filesystem::create_directory(fwd);
+
+            libzippp::ZipArchive zf(name);
+            zf.open(libzippp::ZipArchive::ReadOnly);
+            SCOPE_DEFER ([&zf] { zf.close(); });
+
+            for (libzippp::ZipEntry& entry : zf.getEntries())
+            {
+                std::string const zipname = fwd + entry.getName();
+                std::size_t const zipsize = entry.getSize();
+                std::ofstream output(zipname, std::ios::out | std::ios::binary);
+
+                char const* binary = static_cast<char const*>(entry.readAsBinary());
+                BOOST_LOG_TRIVIAL(trace) << "Extract to " << zipname << " \n";
+                output.write(binary, zipsize);
+            }
+
+            bp::async_pipe ap{ioc_};
+
+            bp::child c(bp::search_path("python3"),
+                        bp::start_dir = fwd,
+                        bp::args({"-c", "from main import main; main()"}),
+                        bp::std_out > ap);
+            std::string body;
+            std::array<char, 4096> buf;
+            beast::error_code ec;
+
+            for (;;)
+            {
+                std::size_t length = ap.async_read_some(boost::asio::buffer(buf), yield[ec]);
+                BOOST_LOG_TRIVIAL(trace) << "read from python size: " << length << "\n";
+                body.append(buf.data(), length);
+
+                if (ec)
+                {
+                    if (ec != boost::asio::error::eof)
+                        BOOST_LOG_TRIVIAL(error) << "error reading child " << ec.message() << "\n";
+                    break;
+                }
+            }
+            c.wait();
+
+            http::response<http::string_body> res{http::status::ok, req.version()};
+
+            res.body() = body;
             res.set(http::field::server, BOOST_BEAST_VERSION_STRING);
             res.set(http::field::content_type, "application/text");
             res.keep_alive(req.keep_alive());

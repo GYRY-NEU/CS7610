@@ -28,7 +28,11 @@ int main(int argc, char* argv[])
     po::options_description desc{"Options"};
     desc.add_options()
         ("help,h", "Print this help messages")
+        ("storage,s",  po::value<std::string>()->default_value("function/"), "save zip functions at this place")
+
+        ("execpath",  po::value<std::string>()->default_value("functionexec/"), "[worker] execute functions at this place")
         ("register,r", po::value<std::string>(), "[worker] register to this host 'ip:port'")
+
         ("listen,l",   po::value<unsigned short>()->default_value(12000), "[coordinator] listen on this port");
     po::positional_options_description pos_po;
     po::variables_map vm;
@@ -48,11 +52,13 @@ int main(int argc, char* argv[])
     net::io_context ioc {worker};
 
     unsigned short const port = vm["listen"].as<unsigned short>();
+    std::string const storage = vm["storage"].as<std::string>();
+
     BOOST_LOG_TRIVIAL(info) << "listen on " << port << "\n";
     if (vm.count("listen") and not vm.count("register"))
     {
         BOOST_LOG_TRIVIAL(info) << "Starting coordinator\n";
-        auto http = std::make_shared<manager::http_server>(ioc);
+        auto http = std::make_shared<manager::http_server>(ioc, storage);
         boost::asio::spawn(ioc,
                            [http=http->shared_from_this(), port] (net::yield_context yield) {
                                http->do_listen(tcp::endpoint{tcp::v4(), port}, yield);
@@ -63,7 +69,7 @@ int main(int argc, char* argv[])
         BOOST_LOG_TRIVIAL(info) << "Starting worker\n";
 
         std::string const remote = vm["register"].as<std::string>();
-        std::size_t sap = remote.find(":");
+        std::size_t const sap = remote.find(":");
         std::string const remotehost = remote.substr(0, sap);
         unsigned short const remoteport = std::stoi(remote.substr(sap+1));
         BOOST_LOG_TRIVIAL(trace) << "register to " << remotehost << ":" << remoteport << "\n";
@@ -86,7 +92,8 @@ int main(int argc, char* argv[])
 
         http::write(stream, req);
 
-        auto exec = std::make_shared<executer::executer>(ioc);
+        std::string const execpath = vm["execpath"].as<std::string>();
+        auto exec = std::make_shared<executer::executer>(ioc, storage, execpath);
         boost::asio::spawn(ioc,
                            [exec=exec->shared_from_this(), port] (net::yield_context yield) {
                                exec->do_listen(tcp::endpoint{tcp::v4(), port}, yield);
