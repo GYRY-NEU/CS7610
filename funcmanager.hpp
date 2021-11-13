@@ -245,12 +245,30 @@ public:
                 beast::error_code ec;
 
                 boost::uuids::uuid id = basic::genuuid();
-                std::string name = "/tmp/"s + boost::uuids::to_string(id);
+                std::string name = "/tmp/"s + boost::uuids::to_string(id) + ".zip";
                 parser.body_limit(std::numeric_limits<std::uint64_t>::max());
                 parser.get().body().open(name.data(), boost::beast::file_mode::write, ec);
                 http::async_read(stream, buffer, parser, yield[ec]);
 
-                BOOST_LOG_TRIVIAL(trace) << "Writing to " << name << " \n";
+                BOOST_LOG_TRIVIAL(trace) << "Extracting " << name << " \n";
+                libzippp::ZipArchive zf(name);
+                zf.open(libzippp::ZipArchive::ReadOnly);
+                SCOPE_DEFER ([&zf] { zf.close(); });
+
+                std::vector<libzippp::ZipEntry> entries = zf.getEntries();
+
+                for (auto it = entries.begin(); it != entries.end(); ++it)
+                {
+                    libzippp::ZipEntry & entry = *it;
+                    std::string const zipname = entry.getName();
+                    std::size_t const zipsize = entry.getSize();
+                    std::ofstream output(zipname, std::ios::out | std::ios::binary);
+
+                    char const* binary = static_cast<char const*>(entry.readAsBinary());
+                    BOOST_LOG_TRIVIAL(trace) << "Extract to " << zipname << " \n";
+                    output.write(binary, zipsize);
+                }
+
                 http::response<http::string_body> res{http::status::ok, req.version()};
 
                 res.body() = "Accepted => "s + name;

@@ -1,10 +1,12 @@
 [requires]
 boost/1.77.0@
 tbb/2020.3@
+libzippp/4.0@
 
 [options]
 boost:shared=False
 tbb:shared=False
+libzippp:shared=False
 
 [generators]
 cmake
