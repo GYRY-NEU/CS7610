@@ -12,6 +12,7 @@
 
 #include <boost/log/trivial.hpp>
 #include <boost/log/core.hpp>
+
 #if defined(__clang__)
     #pragma clang diagnostic push
     #pragma clang diagnostic ignored "-Wunknown-warning-option"
@@ -39,7 +40,9 @@
 
 #include <boost/filesystem.hpp>
 
+#pragma GCC diagnostic ignored "-Wunused-result"
 #include <boost/process.hpp>
+#pragma GCC diagnostic pop
 
 #include <tbb/concurrent_unordered_set.h>
 
@@ -107,6 +110,32 @@ auto genuuid() -> boost::uuids::uuid
 {
     return boost::uuids::random_generator()();
 }
+
+auto parse_host(std::string const & remote) -> std::pair<std::string, unsigned short>
+{
+    std::size_t const sap = remote.find(":");
+    unsigned short port = 80;
+    if (sap != remote.npos)
+        port = std::stoi(remote.substr(sap+1));
+    return {remote.substr(0, sap), port};
+}
+
+namespace sswitcher
+{
+
+constexpr inline
+auto hash(char const * str, std::size_t h) -> long long int
+{
+    return (h == 0 ? 5381 : ((hash(str, h-1) * 33) ^ str[h-1]) & 0xFFFFFFFFFFFF);
+}
+
+constexpr inline
+auto operator "" _(char const * p, std::size_t m) -> long long int { return hash(p, m); }
+
+inline
+auto hash(std::string const & s) -> long long int { return hash(s.c_str(), s.size()); }
+
+}// namespace sswitcher
 
 }// namespace basic
 

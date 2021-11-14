@@ -171,6 +171,8 @@ public:
     {
         // Request path must be absolute and not contain "..".
         auto&& req = reqparser.get();
+        beast::error_code ec;
+
         if (req.target().empty() ||
             req.target()[0] != '/' ||
             req.target().find("..") != beast::string_view::npos)
@@ -189,32 +191,60 @@ public:
         }
         case http::verb::get:
         {
-            worker& back = *workers_.begin();
+            using namespace basic::sswitcher;
+            BOOST_LOG_TRIVIAL(trace) << "Get " << req.target() << "\n";
 
-            http::request<http::string_body> backreq {http::verb::get, "/", req.version()};
-            backreq.set(http::field::host, req[http::field::host]);
-            backreq.set(http::field::user_agent, BOOST_BEAST_VERSION_STRING);
-            beast::error_code ec;
+            switch (basic::sswitcher::hash(req.target().data(), req.target().size()))
+            {
+            case "/get-function"_:
+            {
+                auto && [remotehost, remoteport] = basic::parse_host(std::string(req[http::field::host].data(), req[http::field::host].size()));
+                std::string const & id = remotehost;
+                std::string const full_path = zip_storage_ + id + ".zip";
 
-            BOOST_LOG_TRIVIAL(trace) << "backstream.async_connect\n";
-            beast::tcp_stream backstream{ioc_};
-            tcp::endpoint backendpoint(back.address_, back.port_);
-            backstream.async_connect(backendpoint, yield[ec]);
+                BOOST_LOG_TRIVIAL(info) << "sending function zip: " << id << "\n";
 
-            BOOST_LOG_TRIVIAL(trace) << "backstream.async_write\n";
-            http::async_write(backstream, backreq, yield[ec]);
+                http::file_body::value_type file;
+                file.open(full_path.c_str(), beast::file_mode::read, ec);
+                http::response<http::file_body> res{http::status::ok, req.version()};
 
-            BOOST_LOG_TRIVIAL(trace) << "backstream.async_read\n";
-            http::response<http::string_body> backres;
-            http::async_read(backstream, buffer, backres, yield[ec]);
+                res.set(http::field::server, BOOST_BEAST_VERSION_STRING);
+                res.set(http::field::content_type, "application/zip");
+                res.body() = std::move(file);
+                res.keep_alive(req.keep_alive());
+                res.prepare_payload();
+                return send(std::move(res));
+            }
+            default:
+            {
+                worker& back = *workers_.begin();
 
-            http::response<http::string_body> res{http::status::ok, req.version()};
-            res.body() = backres.body();
-            res.set(http::field::server, BOOST_BEAST_VERSION_STRING);
-            res.set(http::field::content_type, "application/text");
-            res.keep_alive(req.keep_alive());
-            res.prepare_payload();
-            return send(std::move(res));
+                http::request<http::string_body> backreq {http::verb::get, "/", req.version()};
+                backreq.set(http::field::host, req[http::field::host]);
+                backreq.set(http::field::user_agent, BOOST_BEAST_VERSION_STRING);
+
+                BOOST_LOG_TRIVIAL(trace) << "backstream.async_connect\n";
+                beast::tcp_stream backstream{ioc_};
+                tcp::endpoint backendpoint(back.address_, back.port_);
+                backstream.async_connect(backendpoint, yield[ec]);
+
+                BOOST_LOG_TRIVIAL(trace) << "backstream.async_write\n";
+                http::async_write(backstream, backreq, yield[ec]);
+
+                BOOST_LOG_TRIVIAL(trace) << "backstream.async_read\n";
+                http::response<http::string_body> backres;
+                http::async_read(backstream, buffer, backres, yield[ec]);
+
+                http::response<http::string_body> res{http::status::ok, req.version()};
+                res.body() = backres.body();
+                res.set(http::field::server, BOOST_BEAST_VERSION_STRING);
+                res.set(http::field::content_type, "application/text");
+                res.keep_alive(req.keep_alive());
+                res.prepare_payload();
+                return send(std::move(res));
+            }
+            }
+            return send(http_server_error("GET not handled", req));
         }
         case http::verb::put:
         {
@@ -227,11 +257,13 @@ public:
             boost::json::object const& obj = v.as_object();
 
             auto && [it, ok] = workers_.emplace (
-                boost::json::value_to<std::string>(obj.at("host")).c_str(),
+                (obj.if_contains("host")?
+                 boost::json::value_to<std::string>(obj.at("host")).c_str():
+                 stream.socket().remote_endpoint().address().to_string().c_str()),
                 boost::json::value_to<int>(obj.at("port"))
             );
 
-            BOOST_LOG_TRIVIAL(trace) << *it << "\n";
+            BOOST_LOG_TRIVIAL(info) << "Registered executer: " << *it << "\n";
             http::response<http::string_body> res{http::status::ok, req.version()};
 
             res.body() = "Registered"s;
@@ -258,7 +290,7 @@ public:
 
                 http::response<http::string_body> res{http::status::ok, req.version()};
 
-                res.body() = "Accepted => "s + name;
+                res.body() = "Accepted => "s + boost::uuids::to_string(id) + "\n";
                 res.set(http::field::server, BOOST_BEAST_VERSION_STRING);
                 res.set(http::field::content_type, "application/text");
                 res.keep_alive(req.keep_alive());

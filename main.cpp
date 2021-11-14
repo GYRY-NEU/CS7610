@@ -68,32 +68,11 @@ int main(int argc, char* argv[])
     {
         BOOST_LOG_TRIVIAL(info) << "Starting worker\n";
 
-        std::string const remote = vm["register"].as<std::string>();
-        std::size_t const sap = remote.find(":");
-        std::string const remotehost = remote.substr(0, sap);
-        unsigned short const remoteport = std::stoi(remote.substr(sap+1));
-        BOOST_LOG_TRIVIAL(trace) << "register to " << remotehost << ":" << remoteport << "\n";
-
-        beast::tcp_stream stream{ioc};
-        tcp::endpoint backendpoint(net::ip::make_address(remotehost.c_str()), remoteport);
-        stream.connect(backendpoint);
-
-        http::request<http::string_body> req{http::verb::put, "/", 11};
-        req.set(http::field::host, remotehost);
-        req.set(http::field::user_agent, BOOST_BEAST_VERSION_STRING);
-
-        boost::json::value jv = {
-            { "host", remotehost },
-            { "port", port },
-        };
-        BOOST_LOG_TRIVIAL(trace) << "register: " << jv << "\n";
-        req.body() = boost::json::serialize(jv);
-        req.prepare_payload();
-
-        http::write(stream, req);
-
         std::string const execpath = vm["execpath"].as<std::string>();
         auto exec = std::make_shared<executer::executer>(ioc, storage, execpath);
+        std::string const remote = vm["register"].as<std::string>();
+        exec->register_master(remote, port);
+
         boost::asio::spawn(ioc,
                            [exec=exec->shared_from_this(), port] (net::yield_context yield) {
                                exec->do_listen(tcp::endpoint{tcp::v4(), port}, yield);

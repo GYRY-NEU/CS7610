@@ -12,6 +12,7 @@ class executer : public std::enable_shared_from_this<executer>
     net::io_context & ioc_;
     std::string const zip_storage_;
     std::string const execute_path_;
+    tcp::endpoint master_addr_;
 
     template<typename Body, typename Allocator>
     auto http_bad_request(beast::string_view why,
@@ -28,13 +29,72 @@ class executer : public std::enable_shared_from_this<executer>
     }
 
 public:
-    executer(net::io_context & io, std::string const& zip, std::string const& exec):
+    executer(net::io_context & io,
+             std::string const& zip,
+             std::string const& exec):
         ioc_{io},
         zip_storage_(zip),
         execute_path_(exec)
     {
         boost::filesystem::create_directory(zip_storage_);
         boost::filesystem::create_directory(execute_path_);
+    }
+
+    void register_master(std::string const& remote, unsigned short const port)
+    {
+        auto && [remotehost, remoteport] = basic::parse_host(remote);
+        BOOST_LOG_TRIVIAL(trace) << "register to " << remotehost << ":" << remoteport << "\n";
+
+        beast::tcp_stream stream{ioc_};
+        master_addr_ = tcp::endpoint(net::ip::make_address(remotehost.c_str()), remoteport);
+        stream.connect(master_addr_);
+
+        http::request<http::string_body> req{http::verb::put, "/", 11};
+        req.set(http::field::host, remotehost);
+        req.set(http::field::user_agent, BOOST_BEAST_VERSION_STRING);
+
+        boost::json::value jv = {
+//            { "host", remotehost },
+            { "port", port },
+        };
+        BOOST_LOG_TRIVIAL(trace) << "register: " << jv << "\n";
+        req.body() = boost::json::serialize(jv);
+        req.prepare_payload();
+
+        http::write(stream, req);
+    }
+
+    void getfunc(std::string const& funcid,
+                 net::yield_context yield)
+    {
+        beast::tcp_stream stream{ioc_};
+        beast::error_code ec;
+        stream.async_connect(master_addr_, yield[ec]);
+        if (ec)
+            return basic::fail(ec, "get func async_connect");
+
+        http::request<http::string_body> req{http::verb::get, "/get-function", 11};
+        req.set(http::field::host, funcid);
+        req.set(http::field::user_agent, BOOST_BEAST_VERSION_STRING);
+
+        BOOST_LOG_TRIVIAL(trace) << "get func " << funcid << "\n";
+        req.body() = "";
+        req.prepare_payload();
+
+        http::async_write(stream, req, yield[ec]);
+        if (ec)
+            return basic::fail(ec, "get func send req");
+
+        http::response_parser<http::file_body> parser;
+        beast::flat_buffer buffer;
+        std::string const name = zip_storage_ + funcid + ".zip";
+        parser.get().body().open(name.data(), boost::beast::file_mode::write, ec);
+        if (ec)
+            return basic::fail(ec, "get func open local file");
+
+        http::async_read(stream, buffer, parser, yield[ec]);
+        if (ec)
+            return basic::fail(ec, "get func get file");
     }
 
     void do_listen(tcp::endpoint endpoint,
@@ -139,6 +199,12 @@ public:
             std::string const name = zip_storage_ + host + ".zip";
 
             BOOST_LOG_TRIVIAL(trace) << "Extracting " << name << " \n";
+            if (not boost::filesystem::exists(name))
+            {
+                BOOST_LOG_TRIVIAL(trace) << "File not found " << name << ". Getting from master \n";
+                getfunc(host, yield);
+            }
+
             std::string const fwd = execute_path_ + host + "/";
             boost::filesystem::create_directory(fwd);
 
