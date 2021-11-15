@@ -217,34 +217,66 @@ public:
             }
             default:
             {
-                worker& back = *workers_.begin();
+                for (auto it = workers_.begin(); it != workers_.end(); ++it)
+                {
+                    if (it->alive)
+                    {
+                        worker& back = *it;
 
-                http::request<http::string_body> backreq {http::verb::get, "/", req.version()};
-                backreq.set(http::field::host, req[http::field::host]);
-                backreq.set(http::field::user_agent, BOOST_BEAST_VERSION_STRING);
+                        http::request<http::string_body> backreq {http::verb::get, req.target(), req.version()};
+                        backreq.set(http::field::host, req[http::field::host]);
+                        backreq.set(http::field::user_agent, BOOST_BEAST_VERSION_STRING);
 
-                BOOST_LOG_TRIVIAL(trace) << "backstream.async_connect\n";
-                beast::tcp_stream backstream{ioc_};
-                tcp::endpoint backendpoint(back.address_, back.port_);
-                backstream.async_connect(backendpoint, yield[ec]);
+                        boost::json::value jv = {
+                            { "http", req.version() },
+                        };
 
-                BOOST_LOG_TRIVIAL(trace) << "backstream.async_write\n";
-                http::async_write(backstream, backreq, yield[ec]);
+                        backreq.set("argument", boost::json::serialize(jv));
 
-                BOOST_LOG_TRIVIAL(trace) << "backstream.async_read\n";
-                http::response<http::string_body> backres;
-                http::async_read(backstream, buffer, backres, yield[ec]);
+                        BOOST_LOG_TRIVIAL(trace) << "backstream.async_connect\n";
+                        beast::tcp_stream backstream{ioc_};
+                        tcp::endpoint backendpoint(back.address, back.port);
+                        backstream.async_connect(backendpoint, yield[ec]);
+                        if (ec)
+                        {
+                            basic::fail(ec, "connect failed");
+                            it->alive = false;
+                            continue;
+                        }
 
-                http::response<http::string_body> res{http::status::ok, req.version()};
-                res.body() = backres.body();
-                res.set(http::field::server, BOOST_BEAST_VERSION_STRING);
-                res.set(http::field::content_type, "application/text");
-                res.keep_alive(req.keep_alive());
-                res.prepare_payload();
-                return send(std::move(res));
+                        BOOST_LOG_TRIVIAL(trace) << "backstream.async_write\n";
+                        http::async_write(backstream, backreq, yield[ec]);
+                        if (ec)
+                        {
+                            basic::fail(ec, "write failed");
+                            it->alive = false;
+                            continue;
+                        }
+
+                        BOOST_LOG_TRIVIAL(trace) << "backstream.async_read\n";
+                        http::response<http::string_body> backres;
+                        http::async_read(backstream, buffer, backres, yield[ec]);
+
+                        if (ec)
+                        {
+                            basic::fail(ec, "read failed");
+                            it->alive = false;
+                            continue;
+                        }
+
+                        http::response<http::string_body> res{http::status::ok, req.version()};
+                        res.body() = backres.body();
+                        res.set(http::field::server, BOOST_BEAST_VERSION_STRING);
+                        res.set(http::field::content_type, "application/text");
+                        res.keep_alive(req.keep_alive());
+                        res.prepare_payload();
+                        return send(std::move(res));
+                    }
+                }
+                return send(http_server_error("No Executer found\n", req));
             }
             }
-            return send(http_server_error("GET not handled", req));
+            return send(http_server_error("GET not handled\n", req));
         }
         case http::verb::put:
         {
@@ -262,6 +294,7 @@ public:
                  stream.socket().remote_endpoint().address().to_string().c_str()),
                 boost::json::value_to<int>(obj.at("port"))
             );
+            it->alive = true;
 
             BOOST_LOG_TRIVIAL(info) << "Registered executer: " << *it << "\n";
             http::response<http::string_body> res{http::status::ok, req.version()};

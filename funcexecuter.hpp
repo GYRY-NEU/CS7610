@@ -189,9 +189,20 @@ public:
         auto&& req = reqparser.get();
         switch (req.method())
         {
+        case http::verb::head:
+        {
+            http::response<http::empty_body> res{http::status::ok, req.version()};
+            res.set(http::field::server, BOOST_BEAST_VERSION_STRING);
+            res.set(http::field::content_type, "application/text");
+            res.content_length(0);
+            res.keep_alive(req.keep_alive());
+            return send(std::move(res));
+        }
         case http::verb::get:
         {
             std::string host(req[http::field::host]);
+            std::string const json_argument(req["argument"]);
+
             std::size_t const trim_pos = host.find(":");
             if (trim_pos != host.npos)
                 host = host.substr(0, trim_pos);
@@ -201,7 +212,7 @@ public:
             BOOST_LOG_TRIVIAL(trace) << "Extracting " << name << " \n";
             if (not boost::filesystem::exists(name))
             {
-                BOOST_LOG_TRIVIAL(trace) << "File not found " << name << ". Getting from master \n";
+                BOOST_LOG_TRIVIAL(trace) << "File not found. " << name << ". Getting from master \n";
                 getfunc(host, yield);
             }
 
@@ -227,7 +238,7 @@ public:
 
             bp::child c(bp::search_path("python3"),
                         bp::start_dir = fwd,
-                        bp::args({"-c", "from main import main; main()"}),
+                        bp::args({"-c", "from main import main; main('"s + json_argument + "')"}),
                         bp::std_out > ap);
             std::string body;
             std::array<char, 4096> buf;
