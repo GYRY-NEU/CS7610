@@ -49,6 +49,8 @@
 #include <libzippp/libzippp.h>
 
 #include <fstream>
+#include <charconv>
+
 
 #include "scope_exit.hpp"
 
@@ -111,12 +113,18 @@ auto genuuid() -> boost::uuids::uuid
     return boost::uuids::random_generator()();
 }
 
-auto parse_host(std::string const & remote) -> std::pair<std::string, unsigned short>
+template<typename StringView>
+auto parse_host(StringView const& remote) -> std::pair<StringView, unsigned short>
 {
     std::size_t const sap = remote.find(":");
     unsigned short port = 80;
     if (sap != remote.npos)
-        port = std::stoi(remote.substr(sap+1));
+    {
+        StringView p = remote.substr(sap + 1);
+        std::from_chars_result result = std::from_chars(p.data(), p.data() + p.size(), port);
+        if (result.ec == std::errc::invalid_argument)
+            port = 80;
+    }
     return {remote.substr(0, sap), port};
 }
 
@@ -132,8 +140,8 @@ auto hash(char const * str, std::size_t h) -> long long int
 constexpr inline
 auto operator "" _(char const * p, std::size_t m) -> long long int { return hash(p, m); }
 
-inline
-auto hash(std::string const & s) -> long long int { return hash(s.c_str(), s.size()); }
+template<typename StringView> inline
+auto hash(StringView const & s) -> long long int { return hash(s.data(), s.size()); }
 
 }// namespace sswitcher
 

@@ -194,12 +194,12 @@ public:
             using namespace basic::sswitcher;
             BOOST_LOG_TRIVIAL(trace) << "Get " << req.target() << "\n";
 
-            switch (basic::sswitcher::hash(req.target().data(), req.target().size()))
+            switch (basic::sswitcher::hash(req.target()))
             {
             case "/get-function"_:
             {
-                auto && [remotehost, remoteport] = basic::parse_host(std::string(req[http::field::host].data(), req[http::field::host].size()));
-                std::string const & id = remotehost;
+                auto && [remotehost, remoteport] = basic::parse_host(req[http::field::host]);
+                std::string const id (remotehost);
                 std::string const full_path = zip_storage_ + id + ".zip";
 
                 BOOST_LOG_TRIVIAL(info) << "sending function zip: " << id << "\n";
@@ -215,6 +215,23 @@ public:
                 res.prepare_payload();
                 return send(std::move(res));
             }
+            case "/get-value"_:
+            {
+                auto && [remotehost, remoteport] = basic::parse_host(req[http::field::host]);
+                std::string const id  (remotehost);
+                std::string const key (req["query"]);
+
+                BOOST_LOG_TRIVIAL(trace) << "sending [" << req["query"] << "] = " << id << "\n";
+
+                http::response<http::string_body> res{http::status::ok, req.version()};
+                res.body() = id;
+                res.set(http::field::server, BOOST_BEAST_VERSION_STRING);
+                res.set(http::field::content_type, "application/text");
+                res.keep_alive(req.keep_alive());
+                res.prepare_payload();
+
+                return send(std::move(res));
+            }
             default:
             {
                 for (auto it = workers_.begin(); it != workers_.end(); ++it)
@@ -228,6 +245,9 @@ public:
                         backreq.set(http::field::user_agent, BOOST_BEAST_VERSION_STRING);
 
                         boost::json::value jv = {
+                            { "target", req.target() },
+                            { "host", req[http::field::host] },
+                            { "client", stream.socket().remote_endpoint().address().to_string() },
                             { "http", req.version() },
                         };
 

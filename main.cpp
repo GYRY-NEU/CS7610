@@ -30,7 +30,7 @@ int main(int argc, char* argv[])
         ("help,h", "Print this help messages")
         ("storage,s",  po::value<std::string>()->default_value("function/"), "save zip functions at this place")
 
-        ("execpath",  po::value<std::string>()->default_value("functionexec/"), "[worker] execute functions at this place")
+        ("execpath",   po::value<std::string>()->default_value("functionexec/"), "[worker] execute functions at this place")
         ("register,r", po::value<std::string>(), "[worker] register to this host 'ip:port'")
 
         ("listen,l",   po::value<unsigned short>()->default_value(12000), "[coordinator] listen on this port");
