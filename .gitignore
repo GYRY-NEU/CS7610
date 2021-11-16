@@ -1,2 +1,5 @@
 /build*
 /function*
+cmake-3.22.0-rc3-linux-x86_64.sh
+env
+cmake-3.22.0-rc3-linux-x86_64
