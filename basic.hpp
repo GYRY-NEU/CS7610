@@ -45,6 +45,7 @@
 #pragma GCC diagnostic pop
 
 #include <tbb/concurrent_unordered_set.h>
+#include <tbb/concurrent_unordered_map.h>
 
 #include <libzippp/libzippp.h>
 

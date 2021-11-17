@@ -49,7 +49,7 @@ public:
         master_addr_ = tcp::endpoint(net::ip::make_address(remotehost.c_str()), remoteport);
         stream.connect(master_addr_);
 
-        http::request<http::string_body> req{http::verb::put, "/", 11};
+        http::request<http::string_body> req{http::verb::put, "/register", 11};
         req.set(http::field::host, remotehost);
         req.set(http::field::user_agent, BOOST_BEAST_VERSION_STRING);
 
@@ -73,7 +73,7 @@ public:
         if (ec)
             return basic::fail(ec, "get func async_connect");
 
-        http::request<http::string_body> req{http::verb::get, "/get-function", 11};
+        http::request<http::string_body> req{http::verb::get, "/function", 11};
         req.set(http::field::host, funcid);
         req.set(http::field::user_agent, BOOST_BEAST_VERSION_STRING);
 
@@ -189,85 +189,167 @@ public:
         auto&& req = reqparser.get();
         switch (req.method())
         {
-        case http::verb::head:
-        {
-            http::response<http::empty_body> res{http::status::ok, req.version()};
-            res.set(http::field::server, BOOST_BEAST_VERSION_STRING);
-            res.set(http::field::content_type, "application/text");
-            res.content_length(0);
-            res.keep_alive(req.keep_alive());
-            return send(std::move(res));
-        }
         case http::verb::get:
         {
-            std::string host(req[http::field::host]);
-            std::string const json_argument(req["argument"]);
+            using namespace basic::sswitcher;
+            BOOST_LOG_TRIVIAL(trace) << "get " << req.target() << "\n";
 
-            std::size_t const trim_pos = host.find(":");
-            if (trim_pos != host.npos)
-                host = host.substr(0, trim_pos);
-
-            std::string const name = zip_storage_ + host + ".zip";
-
-            BOOST_LOG_TRIVIAL(trace) << "Extracting " << name << " \n";
-            if (not boost::filesystem::exists(name))
+            switch (basic::sswitcher::hash(req.target()))
             {
-                BOOST_LOG_TRIVIAL(trace) << "File not found. " << name << ". Getting from master \n";
-                getfunc(host, yield);
-            }
-
-            std::string const fwd = execute_path_ + host + "/";
-            boost::filesystem::create_directory(fwd);
-
-            libzippp::ZipArchive zf(name);
-            zf.open(libzippp::ZipArchive::ReadOnly);
-            SCOPE_DEFER ([&zf] { zf.close(); });
-
-            for (libzippp::ZipEntry& entry : zf.getEntries())
+            case "/value"_:
             {
-                std::string const zipname = fwd + entry.getName();
-                std::size_t const zipsize = entry.getSize();
-                std::ofstream output(zipname, std::ios::out | std::ios::binary);
+                auto && [remotehost, remoteport] = basic::parse_host(req[http::field::host]);
+                std::string const id  (remotehost);
 
-                char const* binary = static_cast<char const*>(entry.readAsBinary());
-                BOOST_LOG_TRIVIAL(trace) << "Extract to " << zipname << " \n";
-                output.write(binary, zipsize);
-            }
+                http::request_parser<http::string_body> parser {std::move(reqparser)};
+                beast::error_code ec;
 
-            bp::async_pipe ap{ioc_};
+                parser.body_limit(std::numeric_limits<std::uint64_t>::max());
+                http::async_read(stream, buffer, parser, yield[ec]);
 
-            bp::child c(bp::search_path("python3"),
-                        bp::start_dir = fwd,
-                        bp::args({"-c", "from main import main; main('"s + json_argument + "')"}),
-                        bp::std_out > ap);
-            std::string body;
-            std::array<char, 4096> buf;
-            beast::error_code ec;
-
-            for (;;)
-            {
-                std::size_t length = ap.async_read_some(boost::asio::buffer(buf), yield[ec]);
-                BOOST_LOG_TRIVIAL(trace) << "read from python size: " << length << "\n";
-                body.append(buf.data(), length);
-
-                if (ec)
+                http::response<http::string_body> res;
+                beast::flat_buffer resbuffer;
                 {
-                    if (ec != boost::asio::error::eof)
-                        BOOST_LOG_TRIVIAL(error) << "error reading child " << ec.message() << "\n";
-                    break;
+                    beast::tcp_stream master_stream{ioc_};
+                    master_stream.async_connect(master_addr_, yield[ec]);
+
+                    http::request<http::string_body> req{http::verb::get, "/value", 11};
+                    req.set(http::field::host, remotehost);
+                    req.set("key", parser.get()["key"]);
+                    req.set(http::field::user_agent, BOOST_BEAST_VERSION_STRING);
+                    req.prepare_payload();
+                    http::async_write(master_stream, req, yield[ec]);
+                    http::async_read(master_stream, resbuffer, res, yield[ec]);
                 }
+
+//                http::response<http::string_body> res{http::status::ok, req.version()};
+//                res.body() = parser.get().body();
+//                res.set(http::field::server, BOOST_BEAST_VERSION_STRING);
+//                res.set(http::field::content_type, "application/json");
+//                res.keep_alive(req.keep_alive());
+//                res.prepare_payload();
+
+                return send(std::move(res));
             }
-            c.wait();
+            default:
+            {
+                auto && [remotehost, remoteport] = basic::parse_host(req[http::field::host]);
+                std::string const id (remotehost);
+                std::string const json_argument(req["argument"]);
+                std::string const name = zip_storage_ + id + ".zip";
 
-            http::response<http::string_body> res{http::status::ok, req.version()};
+                BOOST_LOG_TRIVIAL(trace) << "Extracting " << name << " \n";
+                if (not boost::filesystem::exists(name))
+                {
+                    BOOST_LOG_TRIVIAL(trace) << "File not found. " << name << ". Getting from master \n";
+                    getfunc(id, yield);
+                }
 
-            res.body() = body;
-            res.set(http::field::server, BOOST_BEAST_VERSION_STRING);
-            res.set(http::field::content_type, "application/text");
-            res.keep_alive(req.keep_alive());
-            res.prepare_payload();
-            return send(std::move(res));
+                std::string const fwd = execute_path_ + id + "/";
+                boost::filesystem::create_directory(fwd);
+
+                libzippp::ZipArchive zf(name);
+                zf.open(libzippp::ZipArchive::ReadOnly);
+                SCOPE_DEFER ([&zf] { zf.close(); });
+
+                for (libzippp::ZipEntry& entry : zf.getEntries())
+                {
+                    std::string const zipname = fwd + entry.getName();
+                    std::size_t const zipsize = entry.getSize();
+                    std::ofstream output(zipname, std::ios::out | std::ios::binary);
+
+                    char const* binary = static_cast<char const*>(entry.readAsBinary());
+                    BOOST_LOG_TRIVIAL(trace) << "Extract to " << zipname << " \n";
+                    output.write(binary, zipsize);
+                }
+
+                bp::async_pipe ap{ioc_};
+
+                bp::child c(bp::search_path("python3"),
+                            bp::start_dir = fwd,
+                            bp::args({"-c", "from main import main; main('"s + json_argument + "')"}),
+                            bp::std_out > ap);
+                std::string body;
+                std::array<char, 4096> buf;
+                beast::error_code ec;
+
+                for (;;)
+                {
+                    std::size_t length = ap.async_read_some(boost::asio::buffer(buf), yield[ec]);
+                    BOOST_LOG_TRIVIAL(trace) << "read from python size: " << length << "\n";
+                    body.append(buf.data(), length);
+
+                    if (ec)
+                    {
+                        if (ec != boost::asio::error::eof)
+                            BOOST_LOG_TRIVIAL(error) << "error reading child " << ec.message() << "\n";
+                        break;
+                    }
+                }
+                c.wait();
+
+                http::response<http::string_body> res{http::status::ok, req.version()};
+
+                res.body() = body;
+                res.set(http::field::server, BOOST_BEAST_VERSION_STRING);
+                res.set(http::field::content_type, "application/text");
+                res.keep_alive(req.keep_alive());
+                res.prepare_payload();
+                return send(std::move(res));
+            }
+            }
         }
+        case http::verb::put:
+        {
+            using namespace basic::sswitcher;
+            BOOST_LOG_TRIVIAL(trace) << "put " << req.target() << "\n";
+
+            switch (basic::sswitcher::hash(req.target()))
+            {
+            case "/value"_:
+            {
+                auto && [remotehost, remoteport] = basic::parse_host(req[http::field::host]);
+                std::string const id  (remotehost);
+
+                http::request_parser<http::string_body> parser {std::move(reqparser)};
+                beast::error_code ec;
+
+                parser.body_limit(std::numeric_limits<std::uint64_t>::max());
+                http::async_read(stream, buffer, parser, yield[ec]);
+
+                http::response<http::string_body> res;
+                beast::flat_buffer resbuffer;
+                {
+                    beast::tcp_stream master_stream{ioc_};
+                    master_stream.async_connect(master_addr_, yield[ec]);
+
+                    http::request<http::string_body> req{http::verb::put, "/value", 11};
+                    req.set(http::field::host, remotehost);
+                    req.set(http::field::user_agent, BOOST_BEAST_VERSION_STRING);
+
+                    req.body() = parser.get().body();
+                    req.prepare_payload();
+
+                    http::async_write(master_stream, req, yield[ec]);
+
+                    http::async_read(master_stream, resbuffer, res, yield[ec]);
+                }
+
+//                http::response<http::string_body> res{http::status::ok, req.version()};
+//                res.body() = boost::json::serialize(obj.at("value"));
+//                res.set(http::field::server, BOOST_BEAST_VERSION_STRING);
+//                res.set(http::field::content_type, "application/json");
+//                res.keep_alive(req.keep_alive());
+//                res.prepare_payload();
+
+                return send(std::move(res));
+            }
+            default:
+                BOOST_LOG_TRIVIAL(error) << " ERROR. No PUT here: " << req.target() << "\n";
+                return send(http_bad_request("Unhandled HTTP-method", req));
+            }
+        }
+
         default:
             BOOST_LOG_TRIVIAL(info) << "request " << req.method() << "not handled\n";
         }

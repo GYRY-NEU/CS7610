@@ -7,14 +7,11 @@
 namespace storage
 {
 
-class storage
+class storage : public tbb::concurrent_unordered_map<std::string, boost::json::value>
 {
-    tbb::concurrent_unordered_map<std::string, std::string> data_;
 public:
-    storage()
-
 };
 
-} // launch
+} // storage
 
 #endif // FUNCSTORAGE_HPP__

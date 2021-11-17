@@ -1,4 +1,4 @@
-# developer_1.py
+
 import storage
 
 def init():
@@ -72,3 +72,14 @@ def updateModel(list_weights):
 
 def getModel():
     return storage.get("model")
+
+def main(argv):
+    import json
+    v = json.loads(argv)
+
+    init()
+    print(v)
+    ROUND = storage.get("ROUND")
+    ROUND += 1
+    storage.put("ROUND", ROUND)
+    #updateModel(v["data"])

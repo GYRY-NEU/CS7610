@@ -4,6 +4,7 @@
 
 #include "basic.hpp"
 #include "funcworker.hpp"
+#include "funcstorage.hpp"
 
 #include <memory>
 #include <iostream>
@@ -17,6 +18,7 @@ class http_server : public std::enable_shared_from_this<http_server>
 //    tbb::concurrent_unordered_multimap<boost::uuids::uuid, worker> workers_;
     tbb::concurrent_unordered_set<worker, hash<worker>> workers_;
     std::string const zip_storage_;
+    storage::storage kvstore_;
 
     // Returns a bad request response
     template<typename Body, typename Allocator>
@@ -196,7 +198,7 @@ public:
 
             switch (basic::sswitcher::hash(req.target()))
             {
-            case "/get-function"_:
+            case "/function"_:
             {
                 auto && [remotehost, remoteport] = basic::parse_host(req[http::field::host]);
                 std::string const id (remotehost);
@@ -215,18 +217,18 @@ public:
                 res.prepare_payload();
                 return send(std::move(res));
             }
-            case "/get-value"_:
+            case "/value"_:
             {
                 auto && [remotehost, remoteport] = basic::parse_host(req[http::field::host]);
                 std::string const id  (remotehost);
-                std::string const key (req["query"]);
+                std::string const key (req["key"]);
 
-                BOOST_LOG_TRIVIAL(trace) << "sending [" << req["query"] << "] = " << id << "\n";
+                BOOST_LOG_TRIVIAL(trace) << "sending [" << key << "] = " << kvstore_[key] << "\n";
 
                 http::response<http::string_body> res{http::status::ok, req.version()};
-                res.body() = id;
+                res.body() = boost::json::serialize(kvstore_[key]);
                 res.set(http::field::server, BOOST_BEAST_VERSION_STRING);
-                res.set(http::field::content_type, "application/text");
+                res.set(http::field::content_type, "application/json");
                 res.keep_alive(req.keep_alive());
                 res.prepare_payload();
 
@@ -246,7 +248,7 @@ public:
 
                         boost::json::value jv = {
                             { "target", req.target() },
-                            { "host", req[http::field::host] },
+                            { "functionid", req[http::field::host] },
                             { "client", stream.socket().remote_endpoint().address().to_string() },
                             { "http", req.version() },
                         };
@@ -275,7 +277,8 @@ public:
 
                         BOOST_LOG_TRIVIAL(trace) << "backstream.async_read\n";
                         http::response<http::string_body> backres;
-                        http::async_read(backstream, buffer, backres, yield[ec]);
+                        beast::flat_buffer backbuffer;
+                        http::async_read(backstream, backbuffer, backres, yield[ec]);
 
                         if (ec)
                         {
@@ -300,31 +303,75 @@ public:
         }
         case http::verb::put:
         {
-            http::request_parser<http::string_body> parser {std::move(reqparser)};
-            beast::error_code ec;
+            using namespace basic::sswitcher;
+            BOOST_LOG_TRIVIAL(trace) << "Put " << req.target() << "\n";
 
-            parser.body_limit(std::numeric_limits<std::uint64_t>::max());
-            http::async_read(stream, buffer, parser, yield[ec]);
-            boost::json::value v = boost::json::parse(parser.get().body());
-            boost::json::object const& obj = v.as_object();
+            switch (basic::sswitcher::hash(req.target()))
+            {
+            case "/value"_:
+            {
+                auto && [remotehost, remoteport] = basic::parse_host(req[http::field::host]);
+                std::string const id  (remotehost);
 
-            auto && [it, ok] = workers_.emplace (
-                (obj.if_contains("host")?
-                 boost::json::value_to<std::string>(obj.at("host")).c_str():
-                 stream.socket().remote_endpoint().address().to_string().c_str()),
-                boost::json::value_to<int>(obj.at("port"))
-            );
-            it->alive = true;
+                http::request_parser<http::string_body> parser {std::move(reqparser)};
+                beast::error_code ec;
 
-            BOOST_LOG_TRIVIAL(info) << "Registered executer: " << *it << "\n";
-            http::response<http::string_body> res{http::status::ok, req.version()};
+                parser.body_limit(std::numeric_limits<std::uint64_t>::max());
+                http::async_read(stream, buffer, parser, yield[ec]);
 
-            res.body() = "Registered"s;
-            res.set(http::field::server, BOOST_BEAST_VERSION_STRING);
-            res.set(http::field::content_type, "application/text");
-            res.keep_alive(req.keep_alive());
-            res.prepare_payload();
-            return send(std::move(res));
+                BOOST_LOG_TRIVIAL(trace) << "Put " << parser.get().body() << "\n";
+                boost::json::value v = boost::json::parse(parser.get().body());
+                boost::json::object const& obj = v.as_object();
+
+                std::string const key = boost::json::value_to<std::string>(obj.at("key"));
+                BOOST_LOG_TRIVIAL(trace) << "Insert [" << key << "] = " << obj.at("value") << "\n";
+                kvstore_[key] = obj.at("value");
+
+                http::response<http::string_body> res{http::status::ok, req.version()};
+                boost::json::value jv = {
+                    { "status", "ok" },
+                };
+                res.body() = boost::json::serialize(jv);
+                res.set(http::field::server, BOOST_BEAST_VERSION_STRING);
+                res.set(http::field::content_type, "application/json");
+                res.keep_alive(req.keep_alive());
+                res.prepare_payload();
+
+                return send(std::move(res));
+            }
+            case "/register"_:
+            {
+                http::request_parser<http::string_body> parser {std::move(reqparser)};
+                beast::error_code ec;
+
+                parser.body_limit(std::numeric_limits<std::uint64_t>::max());
+                http::async_read(stream, buffer, parser, yield[ec]);
+                boost::json::value v = boost::json::parse(parser.get().body());
+                boost::json::object const& obj = v.as_object();
+
+                auto && [it, ok] = workers_.emplace (
+                    (obj.if_contains("host")?
+                     boost::json::value_to<std::string>(obj.at("host")).c_str():
+                     stream.socket().remote_endpoint().address().to_string().c_str()),
+                    boost::json::value_to<int>(obj.at("port"))
+                );
+                it->alive = true;
+
+                BOOST_LOG_TRIVIAL(info) << "Registered executer: " << *it << "\n";
+                http::response<http::string_body> res{http::status::ok, req.version()};
+
+                boost::json::value jv = {
+                    { "status", "Registered" },
+                };
+
+                res.body() =boost::json::serialize(jv);
+                res.set(http::field::server, BOOST_BEAST_VERSION_STRING);
+                res.set(http::field::content_type, "application/json");
+                res.keep_alive(req.keep_alive());
+                res.prepare_payload();
+                return send(std::move(res));
+            }
+            }
         }
         case http::verb::post:
         {
