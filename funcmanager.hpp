@@ -369,32 +369,47 @@ public:
                 res.prepare_payload();
                 return send(std::move(res));
             }
+            default:
+                return send(http_server_error("PUT not handled\n", req));
             }
         }
         case http::verb::post:
         {
-            if (req[http::field::content_type] == "application/x-www-form-urlencoded" ||
-                req[http::field::content_type] == "multipart/form-data")
+            using namespace basic::sswitcher;
+            BOOST_LOG_TRIVIAL(trace) << "Get " << req.target() << "\n";
+
+            switch (basic::sswitcher::hash(req.target()))
             {
-                //dynamic_body string_body
-                http::request_parser<http::file_body> parser {std::move(reqparser)};
-                beast::error_code ec;
+            case "/function"_:
+            {
+                if (req[http::field::content_type] == "application/x-www-form-urlencoded" ||
+                    req[http::field::content_type] == "multipart/form-data")
+                {
+                    //dynamic_body string_body
+                    http::request_parser<http::file_body> parser {std::move(reqparser)};
+                    beast::error_code ec;
 
-                boost::uuids::uuid id = basic::genuuid();
-                std::string const name = zip_storage_ + boost::uuids::to_string(id) + ".zip";
-                parser.body_limit(std::numeric_limits<std::uint64_t>::max());
-                parser.get().body().open(name.data(), boost::beast::file_mode::write, ec);
-                http::async_read(stream, buffer, parser, yield[ec]);
+                    boost::uuids::uuid id = basic::genuuid();
+                    std::string const name = zip_storage_ + boost::uuids::to_string(id) + ".zip";
+                    parser.body_limit(std::numeric_limits<std::uint64_t>::max());
+                    parser.get().body().open(name.data(), boost::beast::file_mode::write, ec);
+                    http::async_read(stream, buffer, parser, yield[ec]);
 
-                http::response<http::string_body> res{http::status::ok, req.version()};
+                    http::response<http::string_body> res{http::status::ok, req.version()};
 
-                res.body() = "Accepted => "s + boost::uuids::to_string(id) + "\n";
-                res.set(http::field::server, BOOST_BEAST_VERSION_STRING);
-                res.set(http::field::content_type, "application/text");
-                res.keep_alive(req.keep_alive());
-                res.prepare_payload();
-                return send(std::move(res));
+                    res.body() = "Accepted => "s + boost::uuids::to_string(id) + "\n";
+                    res.set(http::field::server, BOOST_BEAST_VERSION_STRING);
+                    res.set(http::field::content_type, "application/text");
+                    res.keep_alive(req.keep_alive());
+                    res.prepare_payload();
+                    return send(std::move(res));
+                }
+                return send(http_bad_request("Bad POST request", req));
             }
+            default:
+                break;
+            }
+            return send(http_bad_request("Bad POST request", req));
         }
         default:
             BOOST_LOG_TRIVIAL(info) << "request " << req.method() << "not handled\n";
