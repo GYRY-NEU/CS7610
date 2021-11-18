@@ -236,12 +236,10 @@ public:
             }
             default:
             {
-                for (auto it = workers_.begin(); it != workers_.end(); ++it)
+                for (worker& back : workers_)
                 {
-                    if (it->alive)
+                    if (back.alive)
                     {
-                        worker& back = *it;
-
                         http::request<http::string_body> backreq {http::verb::get, req.target(), req.version()};
                         backreq.set(http::field::host, req[http::field::host]);
                         backreq.set(http::field::user_agent, BOOST_BEAST_VERSION_STRING);
@@ -262,7 +260,7 @@ public:
                         if (ec)
                         {
                             basic::fail(ec, "connect failed");
-                            it->alive = false;
+                            back.alive = false;
                             continue;
                         }
 
@@ -271,7 +269,7 @@ public:
                         if (ec)
                         {
                             basic::fail(ec, "write failed");
-                            it->alive = false;
+                            back.alive = false;
                             continue;
                         }
 
@@ -283,7 +281,7 @@ public:
                         if (ec)
                         {
                             basic::fail(ec, "read failed");
-                            it->alive = false;
+                            back.alive = false;
                             continue;
                         }
 

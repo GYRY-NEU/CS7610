@@ -1,27 +1,28 @@
 
-import storage
+import library
 
-def init():
+@library.export
+def init(args):
     model = [[2.2, 1.21, 1.21],
              [3.2, 2.22, 1.21],
              [0.2, 2.21, 2.21],
              [2.2, 4.21, 1.21]]
-    storage.put("model", model)
+    library.put("model", model)
     ROUND = 0
-    storage.put("ROUND", ROUND)
+    library.put("ROUND", ROUND)
     alpha = 0.2
-    storage.put("alpha", alpha)
+    library.put("alpha", alpha)
 
-def updateModel(list_weights):
-
+@library.export
+def updateModel(args):
     """
         list_weights : 3D list of shape : (clientNumber,modelOuter, modelInner)
         It contains all the models for each client
     """
 
-    model = storage.get("model")
-    ROUND = storage.get("ROUND")
-    alpha = storage.get("alpha")
+    model = library.get("model")
+    ROUND = library.get("ROUND")
+    alpha = library.get("alpha")
 
     # this part will change developer to developer
     # one can just take avg
@@ -66,20 +67,14 @@ def updateModel(list_weights):
 
     ROUND += 1
 
-    storage.put("model", model)
-    storage.put("ROUND", ROUND)
-    storage.put("alpha", alpha)
+    library.put("model", model)
+    library.put("ROUND", ROUND)
+    library.put("alpha", alpha)
 
-def getModel():
-    return storage.get("model")
+@library.export
+def getModel(args):
+    return library.get("model")
 
-def main(argv):
-    import json
-    v = json.loads(argv)
-
-    init()
-    print(v)
-    ROUND = storage.get("ROUND")
-    ROUND += 1
-    storage.put("ROUND", ROUND)
-    #updateModel(v["data"])
+@library.export
+def getRound(args):
+    return library.get("ROUND")

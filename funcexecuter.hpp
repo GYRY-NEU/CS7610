@@ -222,18 +222,14 @@ public:
                     http::async_read(master_stream, resbuffer, res, yield[ec]);
                 }
 
-//                http::response<http::string_body> res{http::status::ok, req.version()};
-//                res.body() = parser.get().body();
-//                res.set(http::field::server, BOOST_BEAST_VERSION_STRING);
-//                res.set(http::field::content_type, "application/json");
-//                res.keep_alive(req.keep_alive());
-//                res.prepare_payload();
-
                 return send(std::move(res));
             }
             default:
             {
                 auto && [remotehost, remoteport] = basic::parse_host(req[http::field::host]);
+                std::string target (req.target().substr(1));
+                if (target.empty())
+                    target = "main";
                 std::string const id (remotehost);
                 std::string const json_argument(req["argument"]);
                 std::string const name = zip_storage_ + id + ".zip";
@@ -263,32 +259,25 @@ public:
                     output.write(binary, zipsize);
                 }
 
-                bp::async_pipe ap{ioc_};
+                bp::async_pipe ap{ioc_}, aperr{ioc_};
 
                 bp::child c(bp::search_path("python3"),
                             bp::start_dir = fwd,
-                            bp::args({"-c", "from main import main; main('"s + json_argument + "')"}),
-                            bp::std_out > ap);
-                std::string body;
-                std::array<char, 4096> buf;
-                beast::error_code ec;
-
-                for (;;)
-                {
-                    std::size_t length = ap.async_read_some(boost::asio::buffer(buf), yield[ec]);
-                    BOOST_LOG_TRIVIAL(trace) << "read from python size: " << length << "\n";
-                    body.append(buf.data(), length);
-
-                    if (ec)
-                    {
-                        if (ec != boost::asio::error::eof)
-                            BOOST_LOG_TRIVIAL(error) << "error reading child " << ec.message() << "\n";
-                        break;
-                    }
-                }
+                            bp::args({"-c", "from main import *; "s + target + "('" + json_argument + "'); "}),
+                            bp::std_out > ap,
+                            bp::std_err > aperr);
+                std::string body = read_pipe(ap, yield);
+                std::string const bodyerr = read_pipe(aperr, yield);
                 c.wait();
 
-                http::response<http::string_body> res{http::status::ok, req.version()};
+                http::status ret = http::status::ok;
+                if (c.exit_code() != EXIT_SUCCESS)
+                {
+                    ret = http::status::bad_request;
+                    body.append(bodyerr);
+                }
+
+                http::response<http::string_body> res{ret, req.version()};
 
                 res.body() = body;
                 res.set(http::field::server, BOOST_BEAST_VERSION_STRING);
@@ -335,13 +324,6 @@ public:
                     http::async_read(master_stream, resbuffer, res, yield[ec]);
                 }
 
-//                http::response<http::string_body> res{http::status::ok, req.version()};
-//                res.body() = boost::json::serialize(obj.at("value"));
-//                res.set(http::field::server, BOOST_BEAST_VERSION_STRING);
-//                res.set(http::field::content_type, "application/json");
-//                res.keep_alive(req.keep_alive());
-//                res.prepare_payload();
-
                 return send(std::move(res));
             }
             default:
@@ -354,6 +336,29 @@ public:
             BOOST_LOG_TRIVIAL(info) << "request " << req.method() << "not handled\n";
         }
         return send(http_bad_request("Unhandled HTTP-method", req));
+    }
+
+    template<typename AsyncStream>
+    auto read_pipe(AsyncStream&& ap, net::yield_context yield)
+    {
+        std::string body;
+        std::array<char, 4096> buf;
+        beast::error_code ec;
+
+        for (;;)
+        {
+            std::size_t length = ap.async_read_some(boost::asio::buffer(buf), yield[ec]);
+            BOOST_LOG_TRIVIAL(trace) << "read from python size: " << length << "\n";
+            body.append(buf.data(), length);
+
+            if (ec)
+            {
+                if (ec != boost::asio::error::eof)
+                    BOOST_LOG_TRIVIAL(error) << "error reading child " << ec.message() << "\n";
+                break;
+            }
+        }
+        return body;
     }
 };
 
