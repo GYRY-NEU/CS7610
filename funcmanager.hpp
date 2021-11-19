@@ -18,7 +18,7 @@ class http_server : public std::enable_shared_from_this<http_server>
 //    tbb::concurrent_unordered_multimap<boost::uuids::uuid, worker> workers_;
     tbb::concurrent_unordered_set<worker, hash<worker>> workers_;
     std::string const zip_storage_;
-    storage::storage kvstore_;
+    storage::storage store_;
 
     // Returns a bad request response
     template<typename Body, typename Allocator>
@@ -218,15 +218,31 @@ public:
                 return send(std::move(res));
             }
             case "/value"_:
+            case "/bucket"_:
             {
                 auto && [remotehost, remoteport] = basic::parse_host(req[http::field::host]);
                 std::string const id  (remotehost);
                 std::string const key (req["key"]);
 
-                BOOST_LOG_TRIVIAL(trace) << "sending [" << key << "] = " << kvstore_[key] << "\n";
+                BOOST_LOG_TRIVIAL(trace) << "sending " << id << "[" << key << "] = " << store_[id].kv[key] << "\n";
 
                 http::response<http::string_body> res{http::status::ok, req.version()};
-                res.body() = boost::json::serialize(kvstore_[key]);
+
+                if (req.target() == "/value")
+                    res.body() = boost::json::serialize(store_[id].kv[key]);
+                else if (req.target() == "/bucket")
+                {
+                    boost::json::array colle;
+                    auto && [start, end] = store_[id].bucket.equal_range(key);
+                    for (auto it = start; it != end; ++it)
+                        colle.emplace_back(it->second);
+
+                    BOOST_LOG_TRIVIAL(trace) << "bucket [" << key << "] " << colle << "\n";
+                    res.body() = boost::json::serialize(colle);
+                }
+                else
+                    BOOST_LOG_TRIVIAL(error) << "target not inserted\n";
+
                 res.set(http::field::server, BOOST_BEAST_VERSION_STRING);
                 res.set(http::field::content_type, "application/json");
                 res.keep_alive(req.keep_alive());
@@ -248,7 +264,6 @@ public:
                             { "target", req.target() },
                             { "functionid", req[http::field::host] },
                             { "client", stream.socket().remote_endpoint().address().to_string() },
-                            { "http", req.version() },
                         };
 
                         backreq.set("argument", boost::json::serialize(jv));
@@ -307,6 +322,7 @@ public:
             switch (basic::sswitcher::hash(req.target()))
             {
             case "/value"_:
+            case "/bucket"_:
             {
                 auto && [remotehost, remoteport] = basic::parse_host(req[http::field::host]);
                 std::string const id  (remotehost);
@@ -322,8 +338,13 @@ public:
                 boost::json::object const& obj = v.as_object();
 
                 std::string const key = boost::json::value_to<std::string>(obj.at("key"));
-                BOOST_LOG_TRIVIAL(trace) << "Insert [" << key << "] = " << obj.at("value") << "\n";
-                kvstore_[key] = obj.at("value");
+                BOOST_LOG_TRIVIAL(trace) << "Insert " << id << "[" << key << "] = " << obj.at("value") << "\n";
+                if (parser.get().target() == "/value")
+                    store_[id].kv[key] = obj.at("value");
+                else if (parser.get().target() == "/bucket")
+                    store_[id].bucket.insert({key, obj.at("value")});
+                else
+                    BOOST_LOG_TRIVIAL(error) << "target not inserted\n";
 
                 http::response<http::string_body> res{http::status::ok, req.version()};
                 boost::json::value jv = {

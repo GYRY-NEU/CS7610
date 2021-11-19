@@ -7,10 +7,20 @@
 namespace storage
 {
 
-class storage : public tbb::concurrent_unordered_map<std::string, boost::json::value>
+class kvstorage : public tbb::concurrent_unordered_map<std::string, boost::json::value>
+{};
+
+class bucketstorage : public tbb::concurrent_unordered_multimap<std::string, boost::json::value>
+{};
+
+struct pack
 {
-public:
+    kvstorage kv;
+    bucketstorage bucket;
 };
+
+class storage : public tbb::concurrent_unordered_map<std::string, pack>
+{};
 
 } // storage
 

@@ -197,9 +197,9 @@ public:
             switch (basic::sswitcher::hash(req.target()))
             {
             case "/value"_:
+            case "/bucket"_:
             {
                 auto && [remotehost, remoteport] = basic::parse_host(req[http::field::host]);
-                std::string const id  (remotehost);
 
                 http::request_parser<http::string_body> parser {std::move(reqparser)};
                 beast::error_code ec;
@@ -213,7 +213,7 @@ public:
                     beast::tcp_stream master_stream{ioc_};
                     master_stream.async_connect(master_addr_, yield[ec]);
 
-                    http::request<http::string_body> req{http::verb::get, "/value", 11};
+                    http::request<http::string_body> req{http::verb::get, parser.get().target(), 11};
                     req.set(http::field::host, remotehost);
                     req.set("key", parser.get()["key"]);
                     req.set(http::field::user_agent, BOOST_BEAST_VERSION_STRING);
@@ -296,6 +296,7 @@ public:
             switch (basic::sswitcher::hash(req.target()))
             {
             case "/value"_:
+            case "/bucket"_:
             {
                 auto && [remotehost, remoteport] = basic::parse_host(req[http::field::host]);
                 std::string const id  (remotehost);
@@ -312,7 +313,7 @@ public:
                     beast::tcp_stream master_stream{ioc_};
                     master_stream.async_connect(master_addr_, yield[ec]);
 
-                    http::request<http::string_body> req{http::verb::put, "/value", 11};
+                    http::request<http::string_body> req{http::verb::put, parser.get().target(), 11};
                     req.set(http::field::host, remotehost);
                     req.set(http::field::user_agent, BOOST_BEAST_VERSION_STRING);
 

@@ -1,4 +1,3 @@
-
 import library
 
 @library.export
@@ -14,6 +13,14 @@ def init(args):
     library.put("alpha", alpha)
 
 @library.export
+def clientUpload(args):
+    library.put_bucket("round1", [[1, 2, 3], [2, 3, 4]])
+    return True
+
+@library.export
+def debug(args):
+    return library.get_bucket("round1")
+
 def updateModel(args):
     """
         list_weights : 3D list of shape : (clientNumber,modelOuter, modelInner)
