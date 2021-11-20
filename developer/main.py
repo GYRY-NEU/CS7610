@@ -1,10 +1,11 @@
 import library
+import json
 
 @library.export
 def init(args):
     model = [[2.2, 1.21, 1.21],
-             [3.2, 2.22, 1.21],
-             [0.2, 2.21, 2.21],
+#             [3.2, 2.22, 1.21],
+#             [0.2, 2.21, 2.21],
              [2.2, 4.21, 1.21]]
     library.put("model", model)
     ROUND = 0
@@ -14,28 +15,36 @@ def init(args):
 
 @library.export
 def clientUpload(args):
-    library.put_bucket("round1", [[1, 2, 3], [2, 3, 4]])
+    client = json.loads(args["data"])
+    k = "round" + str(client["round"])
+    library.put_bucket(k, client["model"])
+    if library.count_bucket(k) > 5:
+        ROUND = library.get("ROUND")
+        if ROUND != client["round"]:
+            return False
+        library.put("ROUND", -1)
+
+        model = library.get("model")
+
+        list_weights = library.get_bucket(k)
+        model = updateModel(model, list_weights)
+
+        library.put("model", model)
+        library.put("ROUND", ROUND+1)
     return True
 
-@library.export
-def debug(args):
-    return library.get_bucket("round1")
-
-def updateModel(args):
+def updateModel(model, list_weights):
     """
         list_weights : 3D list of shape : (clientNumber,modelOuter, modelInner)
         It contains all the models for each client
     """
-
-    model = library.get("model")
-    ROUND = library.get("ROUND")
-    alpha = library.get("alpha")
 
     # this part will change developer to developer
     # one can just take avg
     # or one can discard smallest and largest than take average
     # this example just takes avg without use of external library
 
+    alpha = library.get("alpha")
 
     # getting shape of 3D array
     number_clients = len(list_weights)
@@ -72,11 +81,7 @@ def updateModel(args):
             model[outerIndex][innerIndex] += alpha * newModel[outerIndex][innerIndex]
     # Finally update round number
 
-    ROUND += 1
-
-    library.put("model", model)
-    library.put("ROUND", ROUND)
-    library.put("alpha", alpha)
+    return model
 
 @library.export
 def getModel(args):

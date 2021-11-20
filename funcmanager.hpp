@@ -8,6 +8,7 @@
 
 #include <memory>
 #include <iostream>
+#include <sstream>
 
 namespace manager
 {
@@ -219,11 +220,12 @@ public:
             }
             case "/value"_:
             case "/bucket"_:
+            case "/bucket/count"_:
             {
                 auto && [remotehost, remoteport] = basic::parse_host(req[http::field::host]);
                 std::string const id  (remotehost);
                 std::string const key (req["key"]);
-
+                BOOST_LOG_TRIVIAL(trace) << "sending \n";
                 BOOST_LOG_TRIVIAL(trace) << "sending " << id << "[" << key << "] = " << store_[id].kv[key] << "\n";
 
                 http::response<http::string_body> res{http::status::ok, req.version()};
@@ -239,6 +241,12 @@ public:
 
                     BOOST_LOG_TRIVIAL(trace) << "bucket [" << key << "] " << colle << "\n";
                     res.body() = boost::json::serialize(colle);
+                }
+                else if (req.target() == "/bucket/count")
+                {
+                    boost::json::value size = store_[id].bucket.count(key);
+
+                    res.body() = boost::json::serialize(size);
                 }
                 else
                     BOOST_LOG_TRIVIAL(error) << "target not inserted\n";
@@ -260,10 +268,26 @@ public:
                         backreq.set(http::field::host, req[http::field::host]);
                         backreq.set(http::field::user_agent, BOOST_BEAST_VERSION_STRING);
 
+                        namespace bai = boost::archive::iterators;
+                        using conv64 = bai::base64_from_binary<bai::transform_width<const char *, 6, 8>>;
+                        std::string val = serialize(boost::json::value(nullptr));
+                        if (req["data"] != "")
+                        {
+                            beast::string_view datasv = req["data"].data();
+                            std::stringstream datass;
+                            std::copy(conv64(datasv.data()),
+                                      conv64(datasv.data() + datasv.size()),
+                                      std::ostream_iterator<char>(datass));
+
+                            val = datass.str();
+                            val.append((3 - val.size() % 3) % 3, '=');
+                        }
+
                         boost::json::value jv = {
                             { "target", req.target() },
                             { "functionid", req[http::field::host] },
                             { "client", stream.socket().remote_endpoint().address().to_string() },
+                            { "data", val },
                         };
 
                         backreq.set("argument", boost::json::serialize(jv));

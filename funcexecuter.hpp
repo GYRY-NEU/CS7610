@@ -198,6 +198,7 @@ public:
             {
             case "/value"_:
             case "/bucket"_:
+            case "/bucket/count"_:
             {
                 auto && [remotehost, remoteport] = basic::parse_host(req[http::field::host]);
 
@@ -242,21 +243,24 @@ public:
                 }
 
                 std::string const fwd = execute_path_ + id + "/";
-                boost::filesystem::create_directory(fwd);
-
-                libzippp::ZipArchive zf(name);
-                zf.open(libzippp::ZipArchive::ReadOnly);
-                SCOPE_DEFER ([&zf] { zf.close(); });
-
-                for (libzippp::ZipEntry& entry : zf.getEntries())
+                if (!boost::filesystem::exists(fwd))
                 {
-                    std::string const zipname = fwd + entry.getName();
-                    std::size_t const zipsize = entry.getSize();
-                    std::ofstream output(zipname, std::ios::out | std::ios::binary);
+                    boost::filesystem::create_directory(fwd);
 
-                    char const* binary = static_cast<char const*>(entry.readAsBinary());
-                    BOOST_LOG_TRIVIAL(trace) << "Extract to " << zipname << " \n";
-                    output.write(binary, zipsize);
+                    libzippp::ZipArchive zf(name);
+                    zf.open(libzippp::ZipArchive::ReadOnly);
+                    SCOPE_DEFER ([&zf] { zf.close(); });
+
+                    for (libzippp::ZipEntry& entry : zf.getEntries())
+                    {
+                        std::string const zipname = fwd + entry.getName();
+                        std::size_t const zipsize = entry.getSize();
+                        std::ofstream output(zipname, std::ios::out | std::ios::binary);
+
+                        char const* binary = static_cast<char const*>(entry.readAsBinary());
+                        BOOST_LOG_TRIVIAL(trace) << "Extract to " << zipname << " \n";
+                        output.write(binary, zipsize);
+                    }
                 }
 
                 bp::async_pipe ap{ioc_}, aperr{ioc_};
