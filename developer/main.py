@@ -4,8 +4,8 @@ import json
 @library.export
 def init(args):
     model = [[2.2, 1.21, 1.21],
-#             [3.2, 2.22, 1.21],
-#             [0.2, 2.21, 2.21],
+             [3.2, 2.22, 1.21],
+             [0.2, 2.21, 2.21],
              [2.2, 4.21, 1.21]]
     library.put("model", model)
     ROUND = 0
@@ -18,7 +18,7 @@ def clientUpload(args):
     client = json.loads(args["data"])
     k = "round" + str(client["round"])
     library.put_bucket(k, client["model"])
-    if library.count_bucket(k) > 5:
+    if library.count_bucket(k) > 20:
         ROUND = library.get("ROUND")
         if ROUND != client["round"]:
             return False

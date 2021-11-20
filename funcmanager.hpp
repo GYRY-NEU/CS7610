@@ -226,12 +226,14 @@ public:
                 std::string const id  (remotehost);
                 std::string const key (req["key"]);
                 BOOST_LOG_TRIVIAL(trace) << "sending \n";
-                BOOST_LOG_TRIVIAL(trace) << "sending " << id << "[" << key << "] = " << store_[id].kv[key] << "\n";
 
                 http::response<http::string_body> res{http::status::ok, req.version()};
 
                 if (req.target() == "/value")
+                {
+                    BOOST_LOG_TRIVIAL(trace) << "sending " << id << "[" << key << "] = " << store_[id].kv[key] << "\n";
                     res.body() = boost::json::serialize(store_[id].kv[key]);
+                }
                 else if (req.target() == "/bucket")
                 {
                     boost::json::array colle;
@@ -245,7 +247,7 @@ public:
                 else if (req.target() == "/bucket/count")
                 {
                     boost::json::value size = store_[id].bucket.count(key);
-
+                    BOOST_LOG_TRIVIAL(trace) << "bucket [" << key << "] " << size << "\n";
                     res.body() = boost::json::serialize(size);
                 }
                 else
@@ -269,19 +271,21 @@ public:
                         backreq.set(http::field::user_agent, BOOST_BEAST_VERSION_STRING);
 
                         namespace bai = boost::archive::iterators;
-                        using conv64 = bai::base64_from_binary<bai::transform_width<const char *, 6, 8>>;
+
                         std::string val = serialize(boost::json::value(nullptr));
                         if (req["data"] != "")
                         {
-                            beast::string_view datasv = req["data"].data();
+                            beast::string_view datasv = req["data"];
                             std::stringstream datass;
+                            using conv64 = bai::base64_from_binary<bai::transform_width<const char *, 6, 8>>;
                             std::copy(conv64(datasv.data()),
                                       conv64(datasv.data() + datasv.size()),
                                       std::ostream_iterator<char>(datass));
 
                             val = datass.str();
-                            val.append((3 - val.size() % 3) % 3, '=');
+                            val.append((3 - datasv.size() % 3) % 3, '=');
                         }
+                        BOOST_LOG_TRIVIAL(trace) << "converted base64: " << val << "\n";
 
                         boost::json::value jv = {
                             { "target", req.target() },
