@@ -15,13 +15,24 @@ def init(args):
 
 @library.export
 def clientUpload(args):
+    # get client model
     client = json.loads(args["data"])
+
+    # client round
     k = "round" + str(client["round"])
+
+    # save model to buckets
     library.put_bucket(k, client["model"])
+
+    # if enough models
     if library.count_bucket(k) > 20:
         ROUND = library.get("ROUND")
+
+        # check client rounds == current rounds
         if ROUND != client["round"]:
             return False
+
+        # set round to -1 to prevent clients uploading to this bucket
         library.put("ROUND", -1)
 
         model = library.get("model")
@@ -29,6 +40,7 @@ def clientUpload(args):
         list_weights = library.get_bucket(k)
         model = updateModel(model, list_weights)
 
+        # save calculated model and restore round
         library.put("model", model)
         library.put("ROUND", ROUND+1)
     return True

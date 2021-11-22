@@ -11,14 +11,7 @@ cd ..;
 
 echo functionid: $HOST;
 
-waiter()
-{
-    while [[ $(jobs | wc -l) -ge $1 ]]; do
-        sleep 1;
-    done
-}
-
-echo starting 200 clients
+echo starting 100 clients
 
 for i in {1..100}; do
     python3 client/client.py $HOST $master $master_port &
