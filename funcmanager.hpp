@@ -3,8 +3,8 @@
 #define FUNCMANAGER_HPP__
 
 #include "basic.hpp"
-#include "funcworker.hpp"
 #include "funcstorage.hpp"
+#include "funcscheduler.hpp"
 
 #include <memory>
 #include <iostream>
@@ -16,8 +16,7 @@ namespace manager
 class http_server : public std::enable_shared_from_this<http_server>
 {
     net::io_context & ioc_;
-//    tbb::concurrent_unordered_multimap<boost::uuids::uuid, worker> workers_;
-    tbb::concurrent_unordered_set<worker, hash<worker>> workers_;
+    scheduler::scheduler scheduler_;
     std::string const zip_storage_;
     storage::storage store_;
 
@@ -54,7 +53,8 @@ class http_server : public std::enable_shared_from_this<http_server>
 public:
     http_server(net::io_context & io, std::string const &path) :
         ioc_{io},
-        zip_storage_(path)
+        zip_storage_(path),
+        scheduler_{io}
     {
         boost::filesystem::create_directory(zip_storage_);
     }
@@ -262,80 +262,44 @@ public:
             }
             default:
             {
-                for (worker& back : workers_)
+                namespace bai = boost::archive::iterators;
+
+                std::string val = serialize(boost::json::value(nullptr));
+                if (req["data"] != "")
                 {
-                    if (back.alive)
-                    {
-                        http::request<http::string_body> backreq {http::verb::get, req.target(), req.version()};
-                        backreq.set(http::field::host, req[http::field::host]);
-                        backreq.set(http::field::user_agent, BOOST_BEAST_VERSION_STRING);
+                    beast::string_view datasv = req["data"];
+                    std::stringstream datass;
+                    using conv64 = bai::base64_from_binary<bai::transform_width<const char *, 6, 8>>;
+                    std::copy(conv64(datasv.data()),
+                              conv64(datasv.data() + datasv.size()),
+                              std::ostream_iterator<char>(datass));
 
-                        namespace bai = boost::archive::iterators;
+                    val = datass.str();
+                    val.append((3 - datasv.size() % 3) % 3, '=');
+                }
+                BOOST_LOG_TRIVIAL(trace) << "converted base64: " << val << "\n";
 
-                        std::string val = serialize(boost::json::value(nullptr));
-                        if (req["data"] != "")
-                        {
-                            beast::string_view datasv = req["data"];
-                            std::stringstream datass;
-                            using conv64 = bai::base64_from_binary<bai::transform_width<const char *, 6, 8>>;
-                            std::copy(conv64(datasv.data()),
-                                      conv64(datasv.data() + datasv.size()),
-                                      std::ostream_iterator<char>(datass));
+                boost::json::object jv = {
+                    { "data", val },
+                };
 
-                            val = datass.str();
-                            val.append((3 - datasv.size() % 3) % 3, '=');
-                        }
-                        BOOST_LOG_TRIVIAL(trace) << "converted base64: " << val << "\n";
+                boost::optional<std::string> backres = scheduler_.launch(
+                    req.target(),
+                    req[http::field::host],
+                    stream.socket().remote_endpoint().address().to_string(),
+                    jv,
+                    yield);
 
-                        boost::json::value jv = {
-                            { "target", req.target() },
-                            { "functionid", req[http::field::host] },
-                            { "client", stream.socket().remote_endpoint().address().to_string() },
-                            { "data", val },
-                        };
+                if (backres)
+                {
+                    http::response<http::string_body> res{http::status::ok, req.version()};
+                    res.body() = *backres;
+                    res.set(http::field::server, BOOST_BEAST_VERSION_STRING);
+                    res.set(http::field::content_type, "application/text");
+                    res.keep_alive(req.keep_alive());
+                    res.prepare_payload();
 
-                        backreq.set("argument", boost::json::serialize(jv));
-
-                        BOOST_LOG_TRIVIAL(trace) << "backstream.async_connect\n";
-                        beast::tcp_stream backstream{ioc_};
-                        tcp::endpoint backendpoint(back.address, back.port);
-                        backstream.async_connect(backendpoint, yield[ec]);
-                        if (ec)
-                        {
-                            basic::fail(ec, "connect failed");
-                            back.alive = false;
-                            continue;
-                        }
-
-                        BOOST_LOG_TRIVIAL(trace) << "backstream.async_write\n";
-                        http::async_write(backstream, backreq, yield[ec]);
-                        if (ec)
-                        {
-                            basic::fail(ec, "write failed");
-                            back.alive = false;
-                            continue;
-                        }
-
-                        BOOST_LOG_TRIVIAL(trace) << "backstream.async_read\n";
-                        http::response<http::string_body> backres;
-                        beast::flat_buffer backbuffer;
-                        http::async_read(backstream, backbuffer, backres, yield[ec]);
-
-                        if (ec)
-                        {
-                            basic::fail(ec, "read failed");
-                            back.alive = false;
-                            continue;
-                        }
-
-                        http::response<http::string_body> res{http::status::ok, req.version()};
-                        res.body() = backres.body();
-                        res.set(http::field::server, BOOST_BEAST_VERSION_STRING);
-                        res.set(http::field::content_type, "application/text");
-                        res.keep_alive(req.keep_alive());
-                        res.prepare_payload();
-                        return send(std::move(res));
-                    }
+                    return send(std::move(res));
                 }
                 return send(http_server_error("No Executer found\n", req));
             }
@@ -396,12 +360,17 @@ public:
                 boost::json::value v = boost::json::parse(parser.get().body());
                 boost::json::object const& obj = v.as_object();
 
-                auto && [it, ok] = workers_.emplace (
+                auto && [it, ok] = scheduler_.register_worker(
                     (obj.if_contains("host")?
                      boost::json::value_to<std::string>(obj.at("host")).c_str():
                      stream.socket().remote_endpoint().address().to_string().c_str()),
-                    boost::json::value_to<int>(obj.at("port"))
+
+                    boost::json::value_to<int>(obj.at("port")),
+
+                    (obj.if_contains("capacity")?
+                     boost::json::value_to<int>(obj.at("capacity")): 1)
                 );
+
                 it->alive = true;
 
                 BOOST_LOG_TRIVIAL(info) << "Registered executer: " << *it << "\n";

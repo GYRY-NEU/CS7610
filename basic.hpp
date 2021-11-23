@@ -48,6 +48,8 @@
 #include <boost/process.hpp>
 #pragma GCC diagnostic pop
 
+#include <boost/optional.hpp>
+
 // Concurrent container
 #include <tbb/concurrent_unordered_set.h>
 #include <tbb/concurrent_unordered_map.h>
@@ -153,6 +155,8 @@ template<typename StringView> inline
 auto hash(StringView const & s) -> long long int { return hash(s.data(), s.size()); }
 
 }// namespace sswitcher
+
+using strhash = long long int;
 
 }// namespace basic
 
