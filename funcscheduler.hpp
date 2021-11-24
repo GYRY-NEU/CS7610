@@ -4,6 +4,8 @@
 
 #include "basic.hpp"
 
+#include <atomic>
+
 namespace manager
 {
 
@@ -14,15 +16,20 @@ struct worker
 {
     net::ip::address address;
     short unsigned port;
-    std::size_t capacity;
-    std::size_t jobs = 0;
-
+    std::size_t const capacity;
+    std::atomic<std::size_t> jobs = 0;
     bool alive = true;
 
     worker(char const * addr, int rport, std::size_t cap):
         address{net::ip::make_address(addr)},
         port{static_cast<short unsigned>(rport)},
         capacity{cap} {}
+
+    inline
+    double load()
+    {
+        return static_cast<double>(jobs) / capacity;
+    }
 };
 
 auto operator<< (std::ostream& os, worker const& w) -> std::ostream&
@@ -78,13 +85,27 @@ public:
     template <typename ... Params>
     auto launch(Params&&... params) -> boost::optional<std::string>
     {
+        std::vector<std::pair<double, worker::worker*>> candidate;
+        candidate.reserve(workers_.size());
         for (worker::worker& back : workers_)
-        {
             if (back.alive)
+                candidate.emplace_back(back.load(), std::addressof(back));
+
+        std::sort(candidate.begin(), candidate.end(), [](std::pair<double, worker::worker*> const &a,
+                                                         std::pair<double, worker::worker*> const &b){
+                                                          return a.first < b.first;
+                                                      });
+        for (std::pair<double, worker::worker*> const & pair : candidate)
+            if (pair.second->alive)
             {
-                return send_request(back, std::forward<Params>(params)...);
+                pair.second->jobs++;
+                SCOPE_DEFER([&pair]{ pair.second->jobs--; });
+                boost::optional<std::string> result = send_request(*pair.second, std::forward<Params>(params)...);
+
+                if (not result)
+                    continue;
+                return result;
             }
-        }
         return {};
     }
 

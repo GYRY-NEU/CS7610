@@ -56,6 +56,7 @@ public:
         boost::json::value jv = {
 //            { "host", remotehost },
             { "port", port },
+            { "capacity", std::thread::hardware_concurrency() }
         };
         BOOST_LOG_TRIVIAL(trace) << "register: " << jv << "\n";
         req.body() = boost::json::serialize(jv);
