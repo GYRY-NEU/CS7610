@@ -57,7 +57,7 @@ int main(int argc, char* argv[])
     BOOST_LOG_TRIVIAL(info) << "listen on " << port << "\n";
     if (vm.count("listen") and not vm.count("register"))
     {
-        BOOST_LOG_TRIVIAL(info) << "Starting coordinator\n";
+        BOOST_LOG_TRIVIAL(info) << "Starting coordinator in " << boost::filesystem::current_path() << "\n";
         auto http = std::make_shared<manager::http_server>(ioc, storage);
         boost::asio::spawn(ioc,
                            [http=http->shared_from_this(), port] (net::yield_context yield) {
@@ -66,7 +66,7 @@ int main(int argc, char* argv[])
     }
     else if (vm.count("register"))
     {
-        BOOST_LOG_TRIVIAL(info) << "Starting worker\n";
+        BOOST_LOG_TRIVIAL(info) << "Starting worker in " << boost::filesystem::current_path() << "\n";
 
         std::string const execpath = vm["execpath"].as<std::string>();
         auto exec = std::make_shared<executer::executer>(ioc, storage, execpath);

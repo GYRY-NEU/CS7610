@@ -394,7 +394,7 @@ public:
         case http::verb::post:
         {
             using namespace basic::sswitcher;
-            BOOST_LOG_TRIVIAL(trace) << "Get " << req.target() << "\n";
+            BOOST_LOG_TRIVIAL(trace) << "POST " << req.target() << "\n";
 
             switch (basic::sswitcher::hash(req.target()))
             {
