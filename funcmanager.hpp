@@ -16,8 +16,8 @@ namespace manager
 class http_server : public std::enable_shared_from_this<http_server>
 {
     net::io_context & ioc_;
-    scheduler::scheduler scheduler_;
     std::string const zip_storage_;
+    scheduler::scheduler scheduler_;
     storage::storage store_;
 
     // Returns a bad request response
@@ -132,7 +132,7 @@ public:
         for (;;)
         {
             // Set the timeout.
-            stream.expires_after(std::chrono::seconds(30));
+            stream.expires_after(std::chrono::seconds(300));
 
             http::request_parser<http::empty_body> reqparser;
             reqparser.body_limit(std::numeric_limits<std::uint64_t>::max());
@@ -435,6 +435,21 @@ public:
         return send(http_bad_request("Unhandled HTTP-method", req));
     }
 
+    template<typename Time>
+    void spawn_print_status(Time t)
+    {
+        boost::asio::spawn(
+            ioc_,
+            [this, t] (net::yield_context yield) mutable {
+                for (;;)
+                {
+                    boost::asio::deadline_timer timer(ioc_);
+                    timer.expires_from_now(t);
+                    timer.async_wait(yield);
+                    scheduler_.log();
+                }
+            });
+    }
 };
 
 } // manager

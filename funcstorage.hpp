@@ -22,6 +22,15 @@ struct pack
 class storage : public tbb::concurrent_unordered_map<std::string, pack>
 {};
 
+struct cache
+{
+    std::string response;
+    std::chrono::time_point<std::chrono::system_clock> timestamp;
+};
+
+class expire_storage : public tbb::concurrent_unordered_map<std::string, cache>
+{};
+
 } // storage
 
 #endif // FUNCSTORAGE_HPP__

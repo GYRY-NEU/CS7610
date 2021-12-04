@@ -63,6 +63,7 @@ int main(int argc, char* argv[])
                            [http=http->shared_from_this(), port] (net::yield_context yield) {
                                http->do_listen(tcp::endpoint{tcp::v4(), port}, yield);
                            });
+        http->spawn_print_status(boost::posix_time::seconds(1));
     }
     else if (vm.count("register"))
     {

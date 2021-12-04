@@ -8,6 +8,7 @@
 
 #include <boost/asio/ip/tcp.hpp>
 #include <boost/asio/spawn.hpp>
+#include <boost/asio.hpp>
 #include <boost/config.hpp>
 
 #include <boost/log/trivial.hpp>
@@ -50,6 +51,8 @@
 
 #include <boost/optional.hpp>
 
+#include <boost/date_time/posix_time/posix_time.hpp>
+
 // Concurrent container
 #include <tbb/concurrent_unordered_set.h>
 #include <tbb/concurrent_unordered_map.h>
@@ -89,7 +92,7 @@ void init_log()
                                                   boost::log::attributes::named_scope());
 #ifdef NDEBUG
     boost::log::core::get()->set_filter(
-        boost::log::trivial::severity >= boost::log::trivial::info
+        boost::log::trivial::severity >= boost::log::trivial::debug
     );
 #else
     boost::log::core::get()->set_filter(

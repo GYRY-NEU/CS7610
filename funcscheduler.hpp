@@ -30,6 +30,12 @@ struct worker
     {
         return static_cast<double>(jobs) / capacity;
     }
+
+    inline
+    void log() const
+    {
+        BOOST_LOG_TRIVIAL(info) << address.to_string() << ":" << port << "|" << jobs << "/" << capacity << "\n";
+    }
 };
 
 auto operator<< (std::ostream& os, worker const& w) -> std::ostream&
@@ -158,6 +164,13 @@ public:
             return {};
         }
         return backres.body();
+    }
+
+    inline
+    void log()
+    {
+        for (worker::worker & w: workers_)
+            w.log();
     }
 };
 

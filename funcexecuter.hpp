@@ -3,7 +3,7 @@
 #define FUNCEXECUTER_HPP__
 
 #include "basic.hpp"
-
+#include "funcstorage.hpp"
 namespace executer
 {
 
@@ -12,6 +12,7 @@ class executer : public std::enable_shared_from_this<executer>
     net::io_context & ioc_;
     std::string const zip_storage_;
     std::string const execute_path_;
+    storage::expire_storage cache_storage_;
     tcp::endpoint master_addr_;
 
     template<typename Body, typename Allocator>
@@ -157,7 +158,7 @@ public:
 
         for (;;)
         {
-            stream.expires_after(std::chrono::seconds(30));
+            stream.expires_after(std::chrono::seconds(300));
 
             http::request_parser<http::empty_body> reqparser;
             reqparser.body_limit(std::numeric_limits<std::uint64_t>::max());
@@ -209,22 +210,46 @@ public:
                 parser.body_limit(std::numeric_limits<std::uint64_t>::max());
                 http::async_read(stream, buffer, parser, yield[ec]);
 
-                http::response<http::string_body> res;
+                http::response<http::string_body> coordres, res{http::status::ok, req.version()};
                 beast::flat_buffer resbuffer;
+
+                std::string const key(parser.get()["key"]);
+                auto it = cache_storage_.find(key);
+                using namespace std::literals;
+
+                BOOST_LOG_TRIVIAL(trace) << "key: " << key << "\n";
+                if (it != cache_storage_.end() and
+                    std::chrono::system_clock::now() < it->second.timestamp + 5s)
+                {
+                    res.body() = it->second.response;
+                }
+                else
                 {
                     beast::tcp_stream master_stream{ioc_};
                     master_stream.async_connect(master_addr_, yield[ec]);
 
+                    BOOST_LOG_TRIVIAL(trace) << "get res from master\n";
                     http::request<http::string_body> req{http::verb::get, parser.get().target(), 11};
                     req.set(http::field::host, remotehost);
-                    req.set("key", parser.get()["key"]);
+                    req.set("key", key);
                     req.set(http::field::user_agent, BOOST_BEAST_VERSION_STRING);
                     req.prepare_payload();
                     http::async_write(master_stream, req, yield[ec]);
-                    http::async_read(master_stream, resbuffer, res, yield[ec]);
+                    http::async_read(master_stream, resbuffer, coordres, yield[ec]);
+
+                    BOOST_LOG_TRIVIAL(trace) << "set key\n";
+                    cache_storage_[key] = storage::cache{coordres.body(), std::chrono::system_clock::now()};
+                    res.body() = cache_storage_[key].response;
                 }
 
-                return send(std::move(res));
+                BOOST_LOG_TRIVIAL(trace) << "send(res)\n";
+
+                res.set(http::field::server, BOOST_BEAST_VERSION_STRING);
+                res.set(http::field::content_type, "application/text");
+                res.keep_alive(req.keep_alive());
+                res.prepare_payload();
+
+                return send(res);
             }
             default:
             {
@@ -265,6 +290,7 @@ public:
                 }
 
                 bp::async_pipe ap{ioc_}, aperr{ioc_};
+                BOOST_LOG_TRIVIAL(trace) << "Running " << target << " \n";
 
                 bp::child c(bp::search_path("python3"),
                             bp::start_dir = fwd,
