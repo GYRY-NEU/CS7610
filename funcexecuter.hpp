@@ -12,7 +12,7 @@ class executer : public std::enable_shared_from_this<executer>
     net::io_context & ioc_;
     std::string const zip_storage_;
     std::string const execute_path_;
-    storage::expire_storage cache_storage_;
+//    storage::expire_storage cache_storage_;
     tcp::endpoint master_addr_;
 
     template<typename Body, typename Allocator>
@@ -214,16 +214,16 @@ public:
                 beast::flat_buffer resbuffer;
 
                 std::string const key(parser.get()["key"]);
-                auto it = cache_storage_.find(key);
+//                auto it = cache_storage_.find(key);
                 using namespace std::literals;
 
-                BOOST_LOG_TRIVIAL(trace) << "key: " << key << "\n";
-                if (it != cache_storage_.end() and
-                    std::chrono::system_clock::now() < it->second.timestamp + 5s)
-                {
-                    res.body() = it->second.response;
-                }
-                else
+//                BOOST_LOG_TRIVIAL(trace) << "key: " << key << "\n";
+//                if (it != cache_storage_.end() and
+//                    std::chrono::system_clock::now() < it->second.timestamp + 5s)
+//                {
+//                    res.body() = it->second.response;
+//                }
+//                else
                 {
                     beast::tcp_stream master_stream{ioc_};
                     master_stream.async_connect(master_addr_, yield[ec]);
@@ -238,8 +238,8 @@ public:
                     http::async_read(master_stream, resbuffer, coordres, yield[ec]);
 
                     BOOST_LOG_TRIVIAL(trace) << "set key\n";
-                    cache_storage_[key] = storage::cache{coordres.body(), std::chrono::system_clock::now()};
-                    res.body() = cache_storage_[key].response;
+//                    cache_storage_[key] = storage::cache{coordres.body(), std::chrono::system_clock::now()};
+//                    res.body() = cache_storage_[key].response;
                 }
 
                 BOOST_LOG_TRIVIAL(trace) << "send(res)\n";

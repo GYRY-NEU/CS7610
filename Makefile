@@ -1,13 +1,17 @@
 RELEASE_FLAGS=-static -s
-LINUX_HEADER_x86_64=-I/Volumes/transcend/programs/linux-header/x86_64/include
-LINUX_HEADER_arm=-I/Volumes/transcend/programs/linux-header/arm/include
-LINUX_HEADER_i386=-I/Volumes/transcend/programs/linux-header/i386/include
 VERBOSE=-DCMAKE_VERBOSE_MAKEFILE=ON
 
 CC ?= cc
 CXX ?= c++
 
-.PHONY: release debug
+.PHONY: release debug from-docker
+
+from-docker:
+	docker build -t hare1039/final:0.0.1 .;
+	id=$$(docker create hare1039/final:0.0.1); \
+	docker cp $$id:/final/build-release/bin/run .; \
+	docker rm -v $$id; \
+	echo 'binary gerenated to ./run';
 
 release-all: release debug
 	echo "build all"
